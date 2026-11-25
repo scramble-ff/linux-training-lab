@@ -1,7 +1,7 @@
 previous_course_order=(1 2 6 19 20 21 22 23 24 25 26 3 4 18 7 8 9 10 12 11 13 14 15 16 17 5 27 28 29 30)
 course_order=(1 2 6 19 20 21 22 23 24 31 25 26 3 4 18 7 8 9 10 12 11 13 14 15 16 17 5 32 33 34 35 36 27 29 30 28 37 38)
 total=${#course_order[@]}
-version=33
+version=36
 puzzle_start_id=27
 lesson_titles=(
     [1]='Find your bearings'

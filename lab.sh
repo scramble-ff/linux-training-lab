@@ -41,7 +41,7 @@ GUIDE
 }
 
 usage() {
-    printf 'Beginnix — run bash beginnix.sh to open the main menu.\n\n'
+    printf 'Beginnix — run bash lab.sh to open the main menu.\n\n'
     menu_guide
     cat <<'HELP'
 
@@ -76,12 +76,12 @@ Saving and restoring
   practice sessions, lesson-shell history, and the Always move preference.
 
 Command-line shortcuts
-  bash beginnix.sh setup             Open the course menu.
-  bash beginnix.sh setup --training  Start at the first training lesson.
-  bash beginnix.sh setup --puzzles   Start at the first puzzle.
-  bash beginnix.sh setup --jump N    Start at lesson number N.
-  bash beginnix.sh setup --resume FILE   Restore into a fresh lab.
-  bash beginnix.sh teardown          Delete the installed lab and practice.
+  bash lab.sh setup             Open the course menu.
+  bash lab.sh setup --training  Start at the first training lesson.
+  bash lab.sh setup --puzzles   Start at the first puzzle.
+  bash lab.sh setup --jump N    Start at lesson number N.
+  bash lab.sh setup --resume FILE   Restore into a fresh lab.
+  bash lab.sh teardown          Delete the installed lab and practice.
 
 An explicit starting lesson opens separate practice if a course exists.
 In the shell, bn, beginnix and lab are interchangeable. Setup also accepts
@@ -172,7 +172,7 @@ show_current() {
 }
 
 require_install() {
-    installed || fail 'Lab installation not found. Run bash beginnix.sh, then choose Setup.'
+    installed || fail 'Lab installation not found. Run bash lab.sh, then choose Setup.'
 }
 
 lock_installed() {
@@ -391,46 +391,25 @@ select_shell() {
 }
 
 show_banner() {
-    local -a logo fish
-    local i
-    mapfile -t logo <<'LOGO'
- ####   #####   ####  ###  #   #  #   #  ###  #   #
- #   #  #      #       #   ##  #  ##  #   #    # #
- ####   ####   #  ##   #   # # #  # # #   #     #
- #   #  #      #   #   #   #  ##  #  ##   #    # #
- ####   #####   ####  ###  #   #  #   #  ###  #   #
+    if [[ -t 0 && -t 1 ]] && (( cols >= 69 && rows >= 22 )); then
+        banner_rows=12
+        cat <<'LOGO'
+ /$$$$$$$                      /$$                     /$$
+| $$__  $$                    |__/                    |__/
+| $$  \ $$  /$$$$$$   /$$$$$$  /$$ /$$$$$$$  /$$$$$$$  /$$ /$$   /$$
+| $$$$$$$  /$$__  $$ /$$__  $$| $$| $$__  $$| $$__  $$| $$|  $$ /$$/
+| $$__  $$| $$$$$$$$| $$  \ $$| $$| $$  \ $$| $$  \ $$| $$ \  $$$$/
+| $$  \ $$| $$_____/| $$  | $$| $$| $$  | $$| $$  | $$| $$  >$$  $$
+| $$$$$$$/|  $$$$$$$|  $$$$$$$| $$| $$  | $$| $$  | $$| $$ /$$/\  $$
+|_______/  \_______/ \____  $$|__/|__/  |__/|__/  |__/|__/|__/  \__/
+                     /$$  \ $$
+                    |  $$$$$$/
+                     \______/
+                                ><>
 LOGO
-    mapfile -t fish <<'FISH'
-              /\      .
-        _..--/  \_
- |\   .'          '.  o
- | \ /    >_     o  \
- |  X                )
- | / \    .--.     .'
- |/   '._  \/  _.-'
-         '----'
-FISH
-    if (( cols >= 78 )); then
-        banner_rows=${#fish[@]}
-        for i in "${!fish[@]}"; do
-            if (( i >= 2 && i < 2 + ${#logo[@]} )); then
-                printf '%-54s%s\n' "${logo[i-2]}" "${fish[i]}"
-            else
-                printf '%54s%s\n' '' "${fish[i]}"
-            fi
-        done
-    elif (( rows - 6 - ${#options[@]} >= ${#logo[@]} + ${#fish[@]} && cols >= 52 )); then
-        banner_rows=$(( ${#logo[@]} + ${#fish[@]} ))
-        printf '%s\n' "${logo[@]}" "${fish[@]}"
-    elif (( rows >= 19 && cols >= 40 )); then
-        banner_rows=${#fish[@]}
-        for i in "${!fish[@]}"; do
-            if (( i == 3 )); then printf ' BEGINNIX    '; else printf '%13s' ''; fi
-            printf '%s\n' "${fish[i]}"
-        done
     else
-        banner_rows=1
-        printf ' BEGINNIX    ><(>_ o) .\n'
+        banner_rows=2
+        printf ' BEGINNIX\n   ><>\n'
     fi
 }
 
@@ -461,12 +440,7 @@ choose_row() {
                 printf '\033[H\033[2J'
             fi
         fi
-        if [[ ! -t 0 || ! -t 1 ]] || (( rows - 6 - ${#options[@]} < 8 )); then
-            printf ' BEGINNIX    ><(>_ o) .\n'
-            banner_rows=1
-        else
-            show_banner
-        fi
+        show_banner
         width=$total
         if (( cols < 65 )); then width=12; fi
         printf -v filled '%*s' "$((completed * width / run_total))" ''
@@ -1014,7 +988,7 @@ main() {
 previous_course_order=(1 2 6 19 20 21 22 23 24 25 26 3 4 18 7 8 9 10 12 11 13 14 15 16 17 5 27 28 29 30)
 course_order=(1 2 6 19 20 21 22 23 24 31 25 26 3 4 18 7 8 9 10 12 11 13 14 15 16 17 5 32 33 34 35 36 27 29 30 28 37 38)
 total=${#course_order[@]}
-version=33
+version=36
 puzzle_start_id=27
 lesson_titles=(
     [1]='Find your bearings'

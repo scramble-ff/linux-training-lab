@@ -7,7 +7,7 @@ if [[ $# -gt 1 || ( $# -eq 1 && "$1" != --check ) ]]; then
 fi
 
 project_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-output="$project_dir/beginnix.sh"
+output="$project_dir/lab.sh"
 bundle=$(mktemp "$project_dir/.beginnix-build.XXXXXX")
 trap 'rm -f -- "$bundle"' EXIT
 
@@ -24,10 +24,10 @@ bash -n "$bundle"
 
 if [[ "${1:-}" == --check ]]; then
     if ! cmp -s -- "$bundle" "$output"; then
-        printf 'Run ./build.sh to update beginnix.sh.\n' >&2
+        printf 'Run ./build.sh to update lab.sh.\n' >&2
         exit 1
     fi
-    printf 'beginnix.sh matches the source.\n'
+    printf 'lab.sh matches the source.\n'
 else
     chmod 755 "$bundle"
     mv -fT -- "$bundle" "$output"

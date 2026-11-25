@@ -9,7 +9,7 @@ import tempfile
 import time
 import unittest
 
-SCRIPT = Path(__file__).resolve().parents[1] / "beginnix.sh"
+SCRIPT = Path(__file__).resolve().parents[1] / "lab.sh"
 
 
 class LabTests(unittest.TestCase):

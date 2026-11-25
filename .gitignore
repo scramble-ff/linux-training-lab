@@ -10,7 +10,7 @@ beginnix-progress.txt
 training-key
 training-key.pub
 
-# build.sh ships beginnix.sh; only its temporary bundles are local.
+# build.sh ships lab.sh; only its temporary bundles are local.
 /.beginnix-build.*
 
 # Local interface previews
