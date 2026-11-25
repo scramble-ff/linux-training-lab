@@ -1,0 +1,145 @@
+Beginnix challenge catalog
+==========================
+
+Playable order
+--------------
+Use these numbers in the table of contents or with setup --jump N.
+
+01  Find your bearings
+    pwd, ls, cd, cat. Navigate to a supply note and read it.
+
+02  Find the hidden note
+    ls, cd, cat. Find the morning handoff among 65 files in a hidden
+    directory using Tab completion. Try shell history after completion.
+
+03  Read the docs
+    help, man, grep. Look up two options and count warning lines in a log.
+
+04  Set up the staging area
+    mkdir, touch. Create a directory and an empty arrival file inside it.
+
+05  Copy and rename a manifest
+    cp, mv. Back up a manifest and rename a draft while keeping the original.
+
+06  Clear the scratch space
+    rm, rmdir. Remove two practice files and their empty directory.
+
+07  Select the route sheets
+    Quoting, shell globs, cp. Select 18 matching route sheets from 68 files
+    in a directory with spaces in its name.
+
+08  Write and append a report
+    printf, >, >>. Write the first report line and append a second one.
+
+09  Separate output and errors
+    2>, tee. Save errors separately while displaying and saving normal output.
+
+10  Print the dispatch labels
+    printf. Reuse one format for several arguments and zero-pad numeric IDs.
+
+11  Compare the manifests
+    diff. Find the single changed parcel status across two 96-row manifests.
+
+12  Find repeated scans
+    uniq. Find adjacent repeats among 128 scans with nonadjacent duplicates.
+
+13  Follow the ticket
+    find, grep. Locate 10 nested logs with 64 entries each and match an
+    exact ticket ID among decoys.
+
+14  Open the shipment
+    gzip, bzip2, tar, unzip. Follow a set of handoff notes through several
+    archive formats to open a password-protected ZIP.
+
+15  Identify the mystery parcel
+    file, gzip, gunzip. Identify one compressed file among 63 similarly
+    named parcels, record its original filename, and read it.
+
+16  Unlock the note
+    stat, chmod. Inspect the owner, group, and permissions, then add read
+    permission for the owner while keeping the other permissions intact.
+
+17  Two ways to link
+    ln, readlink, ls. Make a symbolic link and a hard link to the same file,
+    then inspect the stored path and compare inode numbers.
+
+18  Edit the shift notes
+    vim or nvim. Search 80 bay entries, edit one status, and save the file.
+
+19  Switch shells
+    ps, sh. Identify the current shell by PID, start a child shell, and
+    submit from inside it.
+
+20  Find your own process
+    sleep, ps, shell background jobs. Start a timer in the background and
+    record its PID while it is still running.
+
+21  Fingerprint a key
+    ssh-keygen. Create a local SSH key pair, identify the public key, and
+    record its fingerprint.
+
+22  Read the system label
+    uname. Record the kernel release and machine architecture.
+
+23  Weigh the parcels
+    df, du. Identify the filesystem type and compare 59 parcel directories.
+
+24  Find the loopback
+    ip. Record the loopback interface and its IPv4 address with prefix length.
+
+25  See what's listening
+    Read a socket capture and identify the loopback-only listener. Explore ss locally.
+
+26  Find the latest dispatch warning
+    tail, grep. Inspect the last 60 log entries and match the newest warning
+    from the dispatch service among recent lookalikes.
+
+27  Reconcile the scans
+    grep, cut, awk, sort, wc. Filter records by exact field values, sort and
+    deduplicate parcel IDs, then report the first ID and distinct count.
+
+28  Pass arguments to a script
+    Bash, positional parameters, shebang, chmod. Format a dock and parcel
+    ID and run the script directly.
+
+29  Make a dispatch decision
+    Bash if, elif, else. Read a complete example, then write a decision
+    script using an exact status check and a numeric threshold.
+
+30  Loop over the queue
+    Bash for, quoted "$@". Handle any number of route labels in order.
+
+31  Read from a pipeline
+    Walk through IFS and while read with a small pipeline. Split and filter
+    incoming rows, then write the matching IDs to a file from the script.
+
+32  Remember the last status
+    Walk through an awk array and END example. Keep each parcel’s latest
+    status, then filter it with if.
+
+33  Rebuild the dispatch packet
+    Outcome-based puzzle. Match night-shift approvals to two route sheets
+    in a 72-file warehouse. Assemble the handoff and verify its manifest.
+
+34  Reconcile the intake
+    Compare two 80-plus-row inventories. Report missing and extra SOUTH
+    crates while accounting for duplicate scans and a neighboring zone.
+
+35  Recover the verified handoff
+    Extract an archive of 72 notes, identify the verified record for the
+    required batch, produce a note and summary, and preserve the archive checksum.
+
+36  Audit the unresolved holds
+    Determine the current status from 192 events. Report EAST tickets
+    still on hold after accounting for later updates.
+
+37  Build the dispatch timeline
+    Combine two scanner logs. Apply exact field and time-window filters,
+    deduplicate overlapping events, and produce a chronological report.
+
+38  Apply the approved access
+    Filter 64 permission requests and change modes on approved files only.
+    The grader checks the modes of every route file.
+
+Challenges 28–32 form the scripting block. The puzzle track starts at
+challenge 33.

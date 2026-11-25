@@ -1,0 +1,74 @@
+# Local Beginnix installations, practice records and exported progress
+.linux-training-lab/
+.beginnix-restore.*/
+.beginnix-previous.*/
+.practice.*/
+previous-attempts/
+.lesson-history-*
+beginnix-progress.txt
+.beginnix-progress.*
+training-key
+training-key.pub
+
+# build.sh ships beginnix.sh; only its temporary bundles are local.
+/.beginnix-build.*
+
+# Local interface previews
+/work/
+
+# Credentials and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets.json
+*.p12
+*.pfx
+.ssh/
+id_ed25519
+id_rsa
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# Node.js
+node_modules/
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
+*.sqlite3-wal
+*.sqlite3-shm
+*.sqlite3-journal
+
+# Build files
+dist/
+build/
+
+# Logs
+*.log
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Operating system files
+.DS_Store
+Thumbs.db

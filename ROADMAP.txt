@@ -1,0 +1,75 @@
+Beginnix roadmap
+
+Puzzle track
+------------
+The puzzle track starts at challenge 33. The tools shown here describe
+possible solution paths. Learners choose their own commands.
+
+Live puzzles
+
+33  Dispatch packet         MULTI-TOOL   grep, find, cp, printf, diff
+34  Intake reconciliation   MULTI-TOOL   grep, cut, sort, comm
+35  Verified archive note   MULTI-TOOL   tar, grep, cp, printf
+36  Latest status audit     MULTI-TOOL   awk, sort
+37  Timeline correlation    MULTI-TOOL   awk, sort
+38  Approved file access     MULTI-TOOL   awk, Bash while/read, chmod, stat
+
+Planned pairs
+
+39–40  Files and archives
+  Verify a tree of symbolic links, hard links, and copies.
+  MULTI-TOOL  find, readlink, stat, diff
+  Recover the right revision across several compressed bundles.
+  MULTI-TOOL  file, tar, gzip, grep, diff
+
+41–42  Processes, services, and logs
+  Reconcile a process inventory with captured status reports.
+  MULTI-TOOL  ps, awk, sort, diff
+  Diagnose a stopped service from a supplied status capture, journal, and config revisions.
+  Grade the first causal error and a repaired local config copy.
+  MULTI-TOOL  systemctl, journalctl, grep
+  Add focused practice with systemctl and journalctl before this puzzle.
+
+43–44  Storage and local shares
+  Match devices to mount points and verify a storage report.
+  MULTI-TOOL  lsblk, findmnt, df
+  Reconcile a captured SMB share inventory with a local manifest.
+  MULTI-TOOL  smbclient, sort, diff
+  Add focused practice with lsblk, findmnt, and smbclient before these
+  puzzles. Supply offline examples of share listings. Setup requires no live share.
+
+Additional puzzle queue
+
+Build the SUID inventory audit and manifest repair first. These are planned
+puzzles. Security evidence consists of ordinary files created by the learner's
+account. Setup needs no privileged executable, sudo rule, or listening service.
+
+• SUID inventory drift. Compare two fictional mode and owner inventories with
+  a baseline and maintenance tickets. Report the unexpected path, its previous
+  and new modes, and the disposition of the approved change.
+• The shipment that will not import. Inspect two manifests byte by byte. Fix
+  CRLF and an embedded tab in an ID. Grade the repaired copy, meaningful
+  spaces, and the original checksum.
+• Who was approved to do what? Compare a fictional sudo -l transcript with
+  the role and ticket expiry. Identify the account, excess grant, evidence
+  and intended scope. No host policy is consulted or modified.
+• Where did the disk space go? Inspect a small sparse file, two hard links,
+  and an ordinary payload. Identify the shared inode and which removal would
+  reclaim the most storage. Grade relationships rather than fixed block counts.
+• Recover one lost change with Git. Restore a route entry in a small offline
+  repository while preserving a newer change and an unrelated working edit.
+• Why did dispatch stop? Use the captured service investigation in the
+  planned 41–42 pair. Include a later distracting warning; verify the cause
+  and corrected config without starting a service.
+
+Future course sections
+Setup now offers guided training, puzzles, a direct jump, and checkpoint
+restore. Add more focused tracks when there is enough material. Possible
+tracks include system administration, permissions, and privilege-escalation
+concepts. Save longer challenges that combine several tools for the
+advanced tracks.
+
+Begindows
+Build a companion Windows training series with the same short,
+hands-on challenge format. At setup, let learners choose between
+Command Prompt (cmd.exe) and PowerShell.
