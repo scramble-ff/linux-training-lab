@@ -23,7 +23,7 @@ expand_search_fixture() {
 prepare() {
     local id=$1 destination=${2:-$(folder "$1")} variant=0
     case "$id" in
-        27|28|29|30|37|38)
+        27|28|29|30|37|38|39|40)
             mkdir -p -- "$destination"
             variant=$(puzzle_variant)
             touch -- "$destination/.seeded-puzzle" ;;
@@ -126,6 +126,12 @@ CHECK
         38)
             write_dispatch_card "$id" "$destination"
             write_access_challenge "$destination"
+            ;;
+        39) write_mode_inventory "$destination" ;;
+        40)
+            manifest_rows rejected > "$destination/rejected.txt"
+            printf 'parcel|destination\nPK-0000|East Gate\n' > "$destination/example.txt"
+            printf 'Intake failed: unexpected byte at end of header. Import stopped before row validation.\n' > "$destination/import.log"
             ;;
         *) write_dispatch_card "$id" "$destination" ;;
     esac
@@ -691,6 +697,38 @@ write_dispatch_packet() {
 
 puzzle_variant() {
     printf '%d' "$((1 + 16#${seed:4:4} % 600))"
+}
+
+write_mode_inventory() {
+    local destination=$1 row path before after
+    for ((row=1; row<=24; row++)); do
+        path="/dispatch/bin/tool-$((1000+variant+row))"
+        before=0755 after=0755
+        case $row in
+            4) before=4755 after=4755 ;;
+            9|17) after=4755 ;;
+            13) after=0750 ;;
+        esac
+        printf '%s|dispatch|%s\n' "$path" "$before"
+        printf '%s|dispatch|%s\n' "$path" "$after" >&3
+    done > "$destination/yesterday.txt" 3> "$destination/today.txt"
+    printf 'T-%d|APPROVED|/dispatch/bin/tool-%d|4755\n' "$variant" "$((1009+variant))" > "$destination/tickets.txt"
+    printf 'T-%d|PENDING|/dispatch/bin/tool-%d|4755\n' "$((variant+1))" "$((1017+variant))" >> "$destination/tickets.txt"
+}
+
+manifest_rows() {
+    local format=$1 row parcel destination ending=''
+    if [[ "$format" == rejected ]]; then ending=$'\r'; fi
+    printf 'parcel|destination%s\n' "$ending"
+    for ((row=1; row<=24; row++)); do
+        printf -v parcel 'PK-%04d' "$((1000+variant+row))"
+        destination='East Gate'
+        if (( row % 3 == 0 )); then destination='North  Annex'; fi
+        if [[ "$format" == rejected ]] && (( row == 4 + variant % 16 )); then
+            parcel="${parcel:0:5}"$'\t'"${parcel:5}"
+        fi
+        printf '%s|%s%s\n' "$parcel" "$destination" "$ending"
+    done
 }
 
 write_hold_audit() {
@@ -1874,6 +1912,49 @@ Fixed-width times sort in chronological order. Sorting the whole
 pair also orders tickets within a minute and removes exact duplicates.
 ANSWER
         37:debrief) printf 'Exact field tests isolate the events you need. Sorting the full time and ticket pair orders the report and removes repeat scans without collapsing different tickets in the same minute.\n' ;;
+        39:intro) cat <<'PROMPT' ;;
+Audit the overnight permission changes
+
+Two tools gained set-user-ID (SUID) overnight. Review the fictional inventory
+snapshots yesterday.txt and today.txt (path|owner|mode). A leading 4 in
+these four-digit modes marks SUID. Compare by path and consult tickets.txt
+(ticket|decision|path|requested mode). Only APPROVED tickets authorize changes.
+
+Write audit.txt with two lines, using the literal labels shown here:
+  INVESTIGATE|path|previous mode|new mode
+  APPROVED|path|ticket ID
+
+Use the exact paths and four-digit modes from the snapshots. All evidence
+is in this folder. Run bn check to review the report, then bn submit.
+PROMPT
+        39:hint) printf 'Compare the snapshots with diff -u. For each newly marked path, check the ticket decision and requested mode.\n' ;;
+        39:answer) cat <<'ANSWER' ;;
+  diff -u yesterday.txt today.txt || true
+  awk -F'|' 'FILENAME=="yesterday.txt" {old[$1]=$3; next}
+    FILENAME=="tickets.txt" {if ($2=="APPROVED") ticket[$3,$4]=$1; next}
+    old[$1]=="0755" && $3=="4755" {
+      if (($1,$3) in ticket) approved="APPROVED|" $1 "|" ticket[$1,$3]
+      else print "INVESTIGATE|" $1 "|" old[$1] "|" $3
+    } END {print approved}' yesterday.txt tickets.txt today.txt > audit.txt
+ANSWER
+        39:debrief) printf 'A snapshot shows current access. Its baseline and approval record explain which change needs investigation.\n' ;;
+        40:intro) cat <<'PROMPT' ;;
+The shipment that will not import
+
+Start with import.log. Compare rejected.txt with the small accepted sample
+example.txt. The importer requires LF after every record, including the
+last. Parcel IDs have the form PK- followed by four digits. Destination
+names are exact, including repeated spaces.
+
+Produce repaired.txt from rejected.txt. Keep the header, record order,
+destinations and original input intact. Use bn check, then bn submit.
+PROMPT
+        40:hint) printf 'Compare both files with cat -A. Look at the ends of lines and inside the parcel IDs.\n' ;;
+        40:answer) cat <<'ANSWER' ;;
+  cat -A example.txt rejected.txt
+  sed -e 's/\r$//' -e 's/^\(PK-[0-9]*\)\t/\1/' rejected.txt > repaired.txt
+ANSWER
+        40:debrief) printf 'Inspecting invisible characters lets you fix a field while preserving meaningful whitespace elsewhere.\n' ;;
         38:intro) cat <<'PROMPT' ;;
 Apply the approved access
 

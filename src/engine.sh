@@ -422,48 +422,78 @@ choose_row() {
     shift
     local -a options=("$@")
     local key suffix size rows cols i start limit n filled empty width banner_rows
-    local highlight='' reset='' label_width
-    if [[ -t 1 && -t 0 && ${TERM:-dumb} != dumb && -z ${NO_COLOR:-} ]]; then
-        highlight=$'\033[7;1m' reset=$'\033[0m'
+    local highlight='' reset='' label_width label row footer=' Up/Down to move   Enter to select'
+    local interactive=0 cursor_menu=0 previous_size='' previous_pick=-1 previous_start=-1
+    local full_draw visible
+    if [[ -t 0 && -t 1 ]]; then
+        interactive=1
+        if [[ ${TERM:-dumb} != dumb ]]; then
+            cursor_menu=1
+            if [[ -z ${NO_COLOR:-} ]]; then highlight=$'\033[7;1m' reset=$'\033[0m'; fi
+        fi
     fi
     pick=0
     while :; do
         rows=24 cols=80
-        if [[ -t 0 && -t 1 ]]; then
+        if (( interactive )); then
             size=$(stty size 2>/dev/null) && read -r rows cols <<< "$size"
             if (( rows < 1 || cols < 1 )); then rows=24 cols=80; fi
-            if [[ ${TERM:-dumb} != dumb ]]; then
+        fi
+        full_draw=0
+        if (( ! cursor_menu )) || [[ "$rows $cols" != "$previous_size" ]]; then
+            full_draw=1
+            previous_size="$rows $cols"
+            if (( cursor_menu )); then
                 if (( ! screen )); then printf '\033[?1049h\033[?25l'; screen=1; fi
                 printf '\033[H\033[2J'
             fi
+            show_banner
+            width=$total
+            if (( cols < 65 )); then width=12; fi
+            printf -v filled '%*s' "$((completed * width / run_total))" ''
+            printf -v empty '%*s' "$((width - ${#filled}))" ''
+            printf ' [%s%s] %d/%d %s completed\n\n %s\n' "${filled// /#}" "${empty// /-}" "$completed" "$run_total" "$run_label" "$heading"
+            limit=$((rows - banner_rows - 6))
+            if (( limit < 1 )); then limit=1; fi
+            if (( ! interactive )); then limit=${#options[@]}; fi
         fi
-        show_banner
-        width=$total
-        if (( cols < 65 )); then width=12; fi
-        printf -v filled '%*s' "$((completed * width / run_total))" ''
-        printf -v empty '%*s' "$((width - ${#filled}))" ''
-        printf ' [%s%s] %d/%d %s completed\n\n %s\n' "${filled// /#}" "${empty// /-}" "$completed" "$run_total" "$run_label" "$heading"
-        limit=$((rows - banner_rows - 6))
-        if (( limit < 1 )); then limit=1; fi
-        if [[ ! -t 0 || ! -t 1 ]]; then limit=${#options[@]}; fi
         start=$((pick >= limit ? pick - limit + 1 : 0))
-        for ((i=start; i<${#options[@]} && i<start+limit; i++)); do
-            label_width=$((cols > 5 ? cols-5 : 1))
-            if [[ ! -t 0 || ! -t 1 ]]; then
+        visible=$((${#options[@]} - start))
+        if (( visible > limit )); then visible=$limit; fi
+        label_width=$((cols > 5 ? cols-5 : 1))
+        for ((i=start; i<start+visible; i++)); do
+            if (( ! interactive )); then
                 printf ' %2d  %s\n' "$((i+1))" "${options[i]}"
-            elif (( i == pick )); then
-                printf '%s > %-*.*s%s\n' "$highlight" "$label_width" "$label_width" "${options[i]}" "$reset"
+                continue
+            fi
+            if (( ! full_draw && start == previous_start )); then
+                if (( pick == previous_pick || (i != pick && i != previous_pick) )); then continue; fi
+            fi
+            if (( i == pick )); then
+                printf -v label ' > %-*.*s' "$label_width" "$label_width" "${options[i]}"
+                row="$highlight${label:0:cols}$reset"
             else
-                printf '   %.*s\n' "$label_width" "${options[i]}"
+                printf -v label '   %.*s' "$label_width" "${options[i]}"
+                row=${label:0:cols}
+            fi
+            if (( full_draw )); then
+                printf '%s\n' "$row"
+            else
+                # The saved cursor is on the footer, one blank line below the list.
+                printf '\033[%dA\r%s\033[K\0338' "$((visible - (i-start) + 1))" "$row"
             fi
         done
-        if [[ ! -t 0 || ! -t 1 ]]; then
+        previous_pick=$pick previous_start=$start
+        if (( ! interactive )); then
             printf ' Choice (1-%d): ' "${#options[@]}"
             IFS= read -r n || exit 0
             if [[ "$n" =~ ^[1-9][0-9]?$ ]] && (( n <= ${#options[@]} )); then pick=$((n-1)); return; fi
             continue
         fi
-        printf '\n Up/Down to move   Enter to select'
+        if (( full_draw )); then
+            printf '\n%.*s' "$cols" "$footer"
+            if (( cursor_menu )); then printf '\0337'; fi
+        fi
         IFS= read -rsn1 key || exit 0
         case "$key" in
             '') return 0 ;;

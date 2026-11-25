@@ -7,6 +7,8 @@ puzzle_objectives() {
         30) objectives=('Preserve archive integrity' 'Recover the verified note' 'Report dock and pallet count') ;;
         28) objectives=('Identify unresolved EAST tickets' 'List each ticket once in order') ;;
         37) objectives=('Identify qualifying time and ticket pairs' 'Build an ordered, unique timeline') ;;
+        39) objectives=('Identify the unapproved mode change' 'Trace the approved change to its ticket') ;;
+        40) objectives=('Restore LF line endings' 'Repair IDs and preserve destination records' 'Preserve the rejected manifest') ;;
         38) objectives=('Apply approved access' 'Preserve all other file modes') ;;
     esac
 }
@@ -93,6 +95,32 @@ check_puzzle_objective() {
             fi ;;
         38.1) check_access_modes "$directory" approved ;;
         38.2) check_access_modes "$directory" other ;;
+        39.*)
+            report="$directory/audit.txt"
+            [[ -f "$report" && ! -L "$report" ]] || fail 'Write your findings in audit.txt.'
+            if [[ "$index" == 1 ]]; then
+                cmp -s <(head -n 1 -- "$report") <(printf 'INVESTIGATE|/dispatch/bin/tool-%d|0755|4755\n' "$((1017+variant))") ||
+                    fail 'Review the path and both modes in the investigation line.'
+            else
+                cmp -s <(tail -n +2 -- "$report") <(printf 'APPROVED|/dispatch/bin/tool-%d|T-%d\n' "$((1009+variant))" "$variant") ||
+                    fail 'Check the approved path and ticket on line 2, then end the report.'
+            fi ;;
+        40.1|40.2)
+            report="$directory/repaired.txt"
+            [[ -f "$report" && ! -L "$report" && ! "$report" -ef "$directory/rejected.txt" ]] || fail 'Create an independent repaired.txt.'
+            if [[ "$index" == 1 ]]; then
+                [[ -s "$report" ]] && ! LC_ALL=C grep -q $'\r' "$report" && cmp -s <(tail -c 1 -- "$report") <(printf '\n') ||
+                    fail 'Check for carriage returns and a final LF.'
+            else
+                LC_ALL=C awk 'NR==FNR {expected[NR]=$0; count=NR; next}
+                    {sub(/\r$/, ""); if (FNR>count || $0!=expected[FNR]) {bad=FNR; exit 1} seen=FNR}
+                    END {if (bad || seen<count) {print "Check manifest record " (bad ? bad : seen+1) " (header is record 1)."; exit 1}}' \
+                    <(manifest_rows clean) "$report" || return 1
+            fi ;;
+        40.3)
+            report="$directory/rejected.txt"
+            [[ -f "$report" && ! -L "$report" ]] && cmp -s -- "$report" <(manifest_rows rejected) ||
+                fail 'The rejected manifest must match the original bytes.' ;;
         *) fail 'Unknown puzzle objective.' ;;
     esac
 }

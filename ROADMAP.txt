@@ -13,14 +13,10 @@ Live puzzles
 36  Latest status audit     MULTI-TOOL   awk, sort
 37  Timeline correlation    MULTI-TOOL   awk, sort
 38  Approved file access     MULTI-TOOL   awk, Bash while/read, chmod, stat
+39  Overnight SUID audit     MULTI-TOOL   diff, awk
+40  Repair a rejected manifest  MULTI-TOOL   cat -A, sed, cmp
 
 Planned pairs
-
-39–40  Files and archives
-  Verify a tree of symbolic links, hard links, and copies.
-  MULTI-TOOL  find, readlink, stat, diff
-  Recover the right revision across several compressed bundles.
-  MULTI-TOOL  file, tar, gzip, grep, diff
 
 41–42  Processes, services, and logs
   Reconcile a process inventory with captured status reports.
@@ -38,18 +34,14 @@ Planned pairs
   Add focused practice with lsblk, findmnt, and smbclient before these
   puzzles. Supply offline examples of share listings. Setup requires no live share.
 
+45–46  Files and archives
+  Verify a tree of symbolic links, hard links, and copies.
+  MULTI-TOOL  find, readlink, stat, diff
+  Recover the right revision across several compressed bundles.
+  MULTI-TOOL  file, tar, gzip, grep, diff
+
 Additional puzzle queue
 
-Build the SUID inventory audit and manifest repair first. These are planned
-puzzles. Security evidence consists of ordinary files created by the learner's
-account. Setup needs no privileged executable, sudo rule, or listening service.
-
-• SUID inventory drift. Compare two fictional mode and owner inventories with
-  a baseline and maintenance tickets. Report the unexpected path, its previous
-  and new modes, and the disposition of the approved change.
-• The shipment that will not import. Inspect two manifests byte by byte. Fix
-  CRLF and an embedded tab in an ID. Grade the repaired copy, meaningful
-  spaces, and the original checksum.
 • Who was approved to do what? Compare a fictional sudo -l transcript with
   the role and ticket expiry. Identify the account, excess grant, evidence
   and intended scope. No host policy is consulted or modified.

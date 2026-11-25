@@ -425,48 +425,78 @@ choose_row() {
     shift
     local -a options=("$@")
     local key suffix size rows cols i start limit n filled empty width banner_rows
-    local highlight='' reset='' label_width
-    if [[ -t 1 && -t 0 && ${TERM:-dumb} != dumb && -z ${NO_COLOR:-} ]]; then
-        highlight=$'\033[7;1m' reset=$'\033[0m'
+    local highlight='' reset='' label_width label row footer=' Up/Down to move   Enter to select'
+    local interactive=0 cursor_menu=0 previous_size='' previous_pick=-1 previous_start=-1
+    local full_draw visible
+    if [[ -t 0 && -t 1 ]]; then
+        interactive=1
+        if [[ ${TERM:-dumb} != dumb ]]; then
+            cursor_menu=1
+            if [[ -z ${NO_COLOR:-} ]]; then highlight=$'\033[7;1m' reset=$'\033[0m'; fi
+        fi
     fi
     pick=0
     while :; do
         rows=24 cols=80
-        if [[ -t 0 && -t 1 ]]; then
+        if (( interactive )); then
             size=$(stty size 2>/dev/null) && read -r rows cols <<< "$size"
             if (( rows < 1 || cols < 1 )); then rows=24 cols=80; fi
-            if [[ ${TERM:-dumb} != dumb ]]; then
+        fi
+        full_draw=0
+        if (( ! cursor_menu )) || [[ "$rows $cols" != "$previous_size" ]]; then
+            full_draw=1
+            previous_size="$rows $cols"
+            if (( cursor_menu )); then
                 if (( ! screen )); then printf '\033[?1049h\033[?25l'; screen=1; fi
                 printf '\033[H\033[2J'
             fi
+            show_banner
+            width=$total
+            if (( cols < 65 )); then width=12; fi
+            printf -v filled '%*s' "$((completed * width / run_total))" ''
+            printf -v empty '%*s' "$((width - ${#filled}))" ''
+            printf ' [%s%s] %d/%d %s completed\n\n %s\n' "${filled// /#}" "${empty// /-}" "$completed" "$run_total" "$run_label" "$heading"
+            limit=$((rows - banner_rows - 6))
+            if (( limit < 1 )); then limit=1; fi
+            if (( ! interactive )); then limit=${#options[@]}; fi
         fi
-        show_banner
-        width=$total
-        if (( cols < 65 )); then width=12; fi
-        printf -v filled '%*s' "$((completed * width / run_total))" ''
-        printf -v empty '%*s' "$((width - ${#filled}))" ''
-        printf ' [%s%s] %d/%d %s completed\n\n %s\n' "${filled// /#}" "${empty// /-}" "$completed" "$run_total" "$run_label" "$heading"
-        limit=$((rows - banner_rows - 6))
-        if (( limit < 1 )); then limit=1; fi
-        if [[ ! -t 0 || ! -t 1 ]]; then limit=${#options[@]}; fi
         start=$((pick >= limit ? pick - limit + 1 : 0))
-        for ((i=start; i<${#options[@]} && i<start+limit; i++)); do
-            label_width=$((cols > 5 ? cols-5 : 1))
-            if [[ ! -t 0 || ! -t 1 ]]; then
+        visible=$((${#options[@]} - start))
+        if (( visible > limit )); then visible=$limit; fi
+        label_width=$((cols > 5 ? cols-5 : 1))
+        for ((i=start; i<start+visible; i++)); do
+            if (( ! interactive )); then
                 printf ' %2d  %s\n' "$((i+1))" "${options[i]}"
-            elif (( i == pick )); then
-                printf '%s > %-*.*s%s\n' "$highlight" "$label_width" "$label_width" "${options[i]}" "$reset"
+                continue
+            fi
+            if (( ! full_draw && start == previous_start )); then
+                if (( pick == previous_pick || (i != pick && i != previous_pick) )); then continue; fi
+            fi
+            if (( i == pick )); then
+                printf -v label ' > %-*.*s' "$label_width" "$label_width" "${options[i]}"
+                row="$highlight${label:0:cols}$reset"
             else
-                printf '   %.*s\n' "$label_width" "${options[i]}"
+                printf -v label '   %.*s' "$label_width" "${options[i]}"
+                row=${label:0:cols}
+            fi
+            if (( full_draw )); then
+                printf '%s\n' "$row"
+            else
+                # The saved cursor is on the footer, one blank line below the list.
+                printf '\033[%dA\r%s\033[K\0338' "$((visible - (i-start) + 1))" "$row"
             fi
         done
-        if [[ ! -t 0 || ! -t 1 ]]; then
+        previous_pick=$pick previous_start=$start
+        if (( ! interactive )); then
             printf ' Choice (1-%d): ' "${#options[@]}"
             IFS= read -r n || exit 0
             if [[ "$n" =~ ^[1-9][0-9]?$ ]] && (( n <= ${#options[@]} )); then pick=$((n-1)); return; fi
             continue
         fi
-        printf '\n Up/Down to move   Enter to select'
+        if (( full_draw )); then
+            printf '\n%.*s' "$cols" "$footer"
+            if (( cursor_menu )); then printf '\0337'; fi
+        fi
         IFS= read -rsn1 key || exit 0
         case "$key" in
             '') return 0 ;;
@@ -986,9 +1016,9 @@ main() {
 }
 
 previous_course_order=(1 2 6 19 20 21 22 23 24 25 26 3 4 18 7 8 9 10 12 11 13 14 15 16 17 5 27 28 29 30)
-course_order=(1 2 6 19 20 21 22 23 24 31 25 26 3 4 18 7 8 9 10 12 11 13 14 15 16 17 5 32 33 34 35 36 27 29 30 28 37 38)
+course_order=(1 2 6 19 20 21 22 23 24 31 25 26 3 4 18 7 8 9 10 12 11 13 14 15 16 17 5 32 33 34 35 36 27 29 30 28 37 38 39 40)
 total=${#course_order[@]}
-version=36
+version=38
 puzzle_start_id=27
 lesson_titles=(
     [1]='Find your bearings'
@@ -1029,9 +1059,11 @@ lesson_titles=(
     [36]='Remember the last status'
     [37]='Build the dispatch timeline'
     [38]='Apply the approved access'
+    [39]='Audit the overnight permission changes'
+    [40]='The shipment that will not import'
 )
 sections=('Navigation and file basics' 'Shell output and text processing' 'Searching and inspecting files' 'Permissions, links and shell tools' 'System and network inspection' 'Scan analysis and shell scripting' 'Dispatch puzzles')
-section_starts=(1 8 13 16 22 27 33 39)
+section_starts=(1 8 13 16 22 27 33 41)
 
 challenge_position() {
     local position
@@ -1242,7 +1274,7 @@ expand_search_fixture() {
 prepare() {
     local id=$1 destination=${2:-$(folder "$1")} variant=0
     case "$id" in
-        27|28|29|30|37|38)
+        27|28|29|30|37|38|39|40)
             mkdir -p -- "$destination"
             variant=$(puzzle_variant)
             touch -- "$destination/.seeded-puzzle" ;;
@@ -1345,6 +1377,12 @@ CHECK
         38)
             write_dispatch_card "$id" "$destination"
             write_access_challenge "$destination"
+            ;;
+        39) write_mode_inventory "$destination" ;;
+        40)
+            manifest_rows rejected > "$destination/rejected.txt"
+            printf 'parcel|destination\nPK-0000|East Gate\n' > "$destination/example.txt"
+            printf 'Intake failed: unexpected byte at end of header. Import stopped before row validation.\n' > "$destination/import.log"
             ;;
         *) write_dispatch_card "$id" "$destination" ;;
     esac
@@ -1910,6 +1948,38 @@ write_dispatch_packet() {
 
 puzzle_variant() {
     printf '%d' "$((1 + 16#${seed:4:4} % 600))"
+}
+
+write_mode_inventory() {
+    local destination=$1 row path before after
+    for ((row=1; row<=24; row++)); do
+        path="/dispatch/bin/tool-$((1000+variant+row))"
+        before=0755 after=0755
+        case $row in
+            4) before=4755 after=4755 ;;
+            9|17) after=4755 ;;
+            13) after=0750 ;;
+        esac
+        printf '%s|dispatch|%s\n' "$path" "$before"
+        printf '%s|dispatch|%s\n' "$path" "$after" >&3
+    done > "$destination/yesterday.txt" 3> "$destination/today.txt"
+    printf 'T-%d|APPROVED|/dispatch/bin/tool-%d|4755\n' "$variant" "$((1009+variant))" > "$destination/tickets.txt"
+    printf 'T-%d|PENDING|/dispatch/bin/tool-%d|4755\n' "$((variant+1))" "$((1017+variant))" >> "$destination/tickets.txt"
+}
+
+manifest_rows() {
+    local format=$1 row parcel destination ending=''
+    if [[ "$format" == rejected ]]; then ending=$'\r'; fi
+    printf 'parcel|destination%s\n' "$ending"
+    for ((row=1; row<=24; row++)); do
+        printf -v parcel 'PK-%04d' "$((1000+variant+row))"
+        destination='East Gate'
+        if (( row % 3 == 0 )); then destination='North  Annex'; fi
+        if [[ "$format" == rejected ]] && (( row == 4 + variant % 16 )); then
+            parcel="${parcel:0:5}"$'\t'"${parcel:5}"
+        fi
+        printf '%s|%s%s\n' "$parcel" "$destination" "$ending"
+    done
 }
 
 write_hold_audit() {
@@ -3093,6 +3163,49 @@ Fixed-width times sort in chronological order. Sorting the whole
 pair also orders tickets within a minute and removes exact duplicates.
 ANSWER
         37:debrief) printf 'Exact field tests isolate the events you need. Sorting the full time and ticket pair orders the report and removes repeat scans without collapsing different tickets in the same minute.\n' ;;
+        39:intro) cat <<'PROMPT' ;;
+Audit the overnight permission changes
+
+Two tools gained set-user-ID (SUID) overnight. Review the fictional inventory
+snapshots yesterday.txt and today.txt (path|owner|mode). A leading 4 in
+these four-digit modes marks SUID. Compare by path and consult tickets.txt
+(ticket|decision|path|requested mode). Only APPROVED tickets authorize changes.
+
+Write audit.txt with two lines, using the literal labels shown here:
+  INVESTIGATE|path|previous mode|new mode
+  APPROVED|path|ticket ID
+
+Use the exact paths and four-digit modes from the snapshots. All evidence
+is in this folder. Run bn check to review the report, then bn submit.
+PROMPT
+        39:hint) printf 'Compare the snapshots with diff -u. For each newly marked path, check the ticket decision and requested mode.\n' ;;
+        39:answer) cat <<'ANSWER' ;;
+  diff -u yesterday.txt today.txt || true
+  awk -F'|' 'FILENAME=="yesterday.txt" {old[$1]=$3; next}
+    FILENAME=="tickets.txt" {if ($2=="APPROVED") ticket[$3,$4]=$1; next}
+    old[$1]=="0755" && $3=="4755" {
+      if (($1,$3) in ticket) approved="APPROVED|" $1 "|" ticket[$1,$3]
+      else print "INVESTIGATE|" $1 "|" old[$1] "|" $3
+    } END {print approved}' yesterday.txt tickets.txt today.txt > audit.txt
+ANSWER
+        39:debrief) printf 'A snapshot shows current access. Its baseline and approval record explain which change needs investigation.\n' ;;
+        40:intro) cat <<'PROMPT' ;;
+The shipment that will not import
+
+Start with import.log. Compare rejected.txt with the small accepted sample
+example.txt. The importer requires LF after every record, including the
+last. Parcel IDs have the form PK- followed by four digits. Destination
+names are exact, including repeated spaces.
+
+Produce repaired.txt from rejected.txt. Keep the header, record order,
+destinations and original input intact. Use bn check, then bn submit.
+PROMPT
+        40:hint) printf 'Compare both files with cat -A. Look at the ends of lines and inside the parcel IDs.\n' ;;
+        40:answer) cat <<'ANSWER' ;;
+  cat -A example.txt rejected.txt
+  sed -e 's/\r$//' -e 's/^\(PK-[0-9]*\)\t/\1/' rejected.txt > repaired.txt
+ANSWER
+        40:debrief) printf 'Inspecting invisible characters lets you fix a field while preserving meaningful whitespace elsewhere.\n' ;;
         38:intro) cat <<'PROMPT' ;;
 Apply the approved access
 
@@ -3160,6 +3273,8 @@ puzzle_objectives() {
         30) objectives=('Preserve archive integrity' 'Recover the verified note' 'Report dock and pallet count') ;;
         28) objectives=('Identify unresolved EAST tickets' 'List each ticket once in order') ;;
         37) objectives=('Identify qualifying time and ticket pairs' 'Build an ordered, unique timeline') ;;
+        39) objectives=('Identify the unapproved mode change' 'Trace the approved change to its ticket') ;;
+        40) objectives=('Restore LF line endings' 'Repair IDs and preserve destination records' 'Preserve the rejected manifest') ;;
         38) objectives=('Apply approved access' 'Preserve all other file modes') ;;
     esac
 }
@@ -3246,6 +3361,32 @@ check_puzzle_objective() {
             fi ;;
         38.1) check_access_modes "$directory" approved ;;
         38.2) check_access_modes "$directory" other ;;
+        39.*)
+            report="$directory/audit.txt"
+            [[ -f "$report" && ! -L "$report" ]] || fail 'Write your findings in audit.txt.'
+            if [[ "$index" == 1 ]]; then
+                cmp -s <(head -n 1 -- "$report") <(printf 'INVESTIGATE|/dispatch/bin/tool-%d|0755|4755\n' "$((1017+variant))") ||
+                    fail 'Review the path and both modes in the investigation line.'
+            else
+                cmp -s <(tail -n +2 -- "$report") <(printf 'APPROVED|/dispatch/bin/tool-%d|T-%d\n' "$((1009+variant))" "$variant") ||
+                    fail 'Check the approved path and ticket on line 2, then end the report.'
+            fi ;;
+        40.1|40.2)
+            report="$directory/repaired.txt"
+            [[ -f "$report" && ! -L "$report" && ! "$report" -ef "$directory/rejected.txt" ]] || fail 'Create an independent repaired.txt.'
+            if [[ "$index" == 1 ]]; then
+                [[ -s "$report" ]] && ! LC_ALL=C grep -q $'\r' "$report" && cmp -s <(tail -c 1 -- "$report") <(printf '\n') ||
+                    fail 'Check for carriage returns and a final LF.'
+            else
+                LC_ALL=C awk 'NR==FNR {expected[NR]=$0; count=NR; next}
+                    {sub(/\r$/, ""); if (FNR>count || $0!=expected[FNR]) {bad=FNR; exit 1} seen=FNR}
+                    END {if (bad || seen<count) {print "Check manifest record " (bad ? bad : seen+1) " (header is record 1)."; exit 1}}' \
+                    <(manifest_rows clean) "$report" || return 1
+            fi ;;
+        40.3)
+            report="$directory/rejected.txt"
+            [[ -f "$report" && ! -L "$report" ]] && cmp -s -- "$report" <(manifest_rows rejected) ||
+                fail 'The rejected manifest must match the original bytes.' ;;
         *) fail 'Unknown puzzle objective.' ;;
     esac
 }

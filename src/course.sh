@@ -1,7 +1,7 @@
 previous_course_order=(1 2 6 19 20 21 22 23 24 25 26 3 4 18 7 8 9 10 12 11 13 14 15 16 17 5 27 28 29 30)
-course_order=(1 2 6 19 20 21 22 23 24 31 25 26 3 4 18 7 8 9 10 12 11 13 14 15 16 17 5 32 33 34 35 36 27 29 30 28 37 38)
+course_order=(1 2 6 19 20 21 22 23 24 31 25 26 3 4 18 7 8 9 10 12 11 13 14 15 16 17 5 32 33 34 35 36 27 29 30 28 37 38 39 40)
 total=${#course_order[@]}
-version=36
+version=38
 puzzle_start_id=27
 lesson_titles=(
     [1]='Find your bearings'
@@ -42,9 +42,11 @@ lesson_titles=(
     [36]='Remember the last status'
     [37]='Build the dispatch timeline'
     [38]='Apply the approved access'
+    [39]='Audit the overnight permission changes'
+    [40]='The shipment that will not import'
 )
 sections=('Navigation and file basics' 'Shell output and text processing' 'Searching and inspecting files' 'Permissions, links and shell tools' 'System and network inspection' 'Scan analysis and shell scripting' 'Dispatch puzzles')
-section_starts=(1 8 13 16 22 27 33 39)
+section_starts=(1 8 13 16 22 27 33 41)
 
 challenge_position() {
     local position

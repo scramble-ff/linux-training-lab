@@ -75,13 +75,17 @@ class LabTests(unittest.TestCase):
                 self.runner("teardown")
 
     def test_final_lesson(self):
-        self.runner("setup", "--jump", "38")
-        folder = self.lesson(38)
-        for row in (folder / "access.log").read_text().splitlines()[1:]:
-            shift, decision, path, role = row.split("|")
-            if shift == "NIGHT" and decision == "APPROVED":
-                (folder / path).chmod({"REVIEW": 0o400, "TEAM_READ": 0o640, "TEAM_EDIT": 0o660}[role])
-        result = self.runner("submit", (folder / "dispatch.txt").read_text().strip())
+        self.runner("setup", "--jump", "40")
+        folder = self.lesson(40)
+        original = (folder / "rejected.txt").read_bytes()
+        clean = original.replace(b"\r\n", b"\n").replace(b"\t", b"")
+        repaired = folder / "repaired.txt"
+        repaired.write_bytes(clean.replace(b"North  Annex", b"North Annex"))
+        self.assertIn("Check manifest record 4", self.runner("check", success=False))
+        repaired.write_bytes(clean.replace(b"\n", b"\r\n"))
+        self.assertIn("[ ] Restore LF", self.runner("check", success=False))
+        repaired.write_bytes(clean)
+        result = self.runner("submit")
         self.assertIn("complete", result)
         self.assertNotIn("Choice [1]", result)
         self.assertIn("Solved: 1 / 1", self.runner("stats"))
@@ -108,12 +112,12 @@ class LabTests(unittest.TestCase):
         self.runner("teardown")
         self.assertEqual(set(self.home.iterdir()), {unrelated, self.home / "beginnix-progress.txt"})
         self.runner("setup", "--resume", str(self.home / "beginnix-progress.txt"))
-        self.assertIn("Solved: 0 / 38", self.runner("stats"))
+        self.assertIn("Solved: 0 / 40", self.runner("stats"))
 
     def test_puzzle_objectives_and_walkthroughs(self):
         self.runner("setup", "--puzzles")
-        self.assertIn("0/6 puzzles completed", self.runner("setup"))
-        for number in range(33, 39):
+        self.assertIn("0/8 puzzles completed", self.runner("setup"))
+        for number in range(33, 41):
             with self.subTest(number=number):
                 folder = self.lesson(number)
                 before = self.runner("check", success=False)
@@ -121,7 +125,7 @@ class LabTests(unittest.TestCase):
                 if number == 33:
                     self.assertIn("[x] Preserve both warehouse originals", before)
                     self.runner("check", success=False)
-                    self.assertIn("demonstrated: 1 / 14", self.runner("stats"))
+                    self.assertIn("demonstrated: 1 / 19", self.runner("stats"))
                 walkthrough = self.runner("answer")
                 example = walkthrough.split("\n\n", 2)[2].split("\n\n", 1)[0]
                 subprocess.run(["bash", "-ec", example], cwd=folder, env=self.env,
@@ -136,12 +140,12 @@ class LabTests(unittest.TestCase):
                     self.assertIn("[x] Recover the verified note", feedback)
                     archive.write_bytes(original)
                 self.assertIn("Completed with walkthrough", self.runner("submit"))
-        self.assertIn("6/6 puzzles completed", self.runner("setup"))
-        self.assertIn("demonstrated: 14 / 14", self.runner("stats"))
+        self.assertIn("8/8 puzzles completed", self.runner("setup"))
+        self.assertIn("demonstrated: 19 / 19", self.runner("stats"))
         self.runner("save")
         self.runner("teardown")
         self.runner("setup", "--resume", str(self.home / "beginnix-progress.txt"))
-        self.assertIn("demonstrated: 14 / 14", self.runner("stats"))
+        self.assertIn("demonstrated: 19 / 19", self.runner("stats"))
 
     def test_restart_preview_and_restore_partial_credit(self):
         self.runner("setup", "--jump", "35")
@@ -243,8 +247,8 @@ class LabTests(unittest.TestCase):
             return result.stdout
 
         arcade = terminal_stats()
-        for item in ("✦ BEGINNIX ARCADE ✦", "89%", "34 / 38", "Report dock and pallet count",
-                     "7 / 14", "NEXT OBJECTIVE", "bn stats --details", "┏━┓", "Independent guided clears"):
+        for item in ("✦ BEGINNIX ARCADE ✦", "85%", "34 / 40", "Report dock and pallet count",
+                     "7 / 19", "NEXT OBJECTIVE", "bn stats --details", "┏━┓", "Independent guided clears"):
             self.assertIn(item, arcade)
         for color in (81, 213, 221):
             self.assertIn(f"\x1b[1;38;5;{color}m", arcade)
@@ -253,14 +257,14 @@ class LabTests(unittest.TestCase):
         compact = terminal_stats(columns=32)
         self.assertNotIn("\x1b[", compact)
         self.assertNotIn("┏━┓", compact)
-        self.assertIn("89%", compact)
+        self.assertIn("85%", compact)
         self.assertNotIn("\x1b[", self.runner("stats"))
         self.runner("teardown")
 
-        all_objectives = first_seven + "30.3,28.1,28.2,37.1,37.2,38.1,38.2,"
-        checkpoint_for(38, "0", all_objectives)
+        all_objectives = first_seven + "30.3,28.1,28.2,37.1,37.2,38.1,38.2,39.1,39.2,40.1,40.2,40.3,"
+        checkpoint_for(40, "0", all_objectives)
         finished = self.runner("stats")
-        for item in ("Course cleared!", "100%", "ALL 6 PUZZLES CLEARED", "Every objective demonstrated!"):
+        for item in ("Course cleared!", "100%", "ALL 8 PUZZLES CLEARED", "Every objective demonstrated!"):
             self.assertIn(item, finished)
         self.assertNotIn("NEXT OBJECTIVE", finished)
 
@@ -278,6 +282,27 @@ class LabTests(unittest.TestCase):
         self.assertFalse((self.root / "previous-attempts").exists())
         self.runner("restart", "--confirm", "34", success=False)
         self.assertFalse((self.root / "previous-attempts").exists())
+
+    def test_menu_arrows_update_in_place(self):
+        command = f"stty rows 11 cols 80; exec bash {shlex.quote(str(SCRIPT))}"
+        for no_color in ("", "1"):
+            with self.subTest(no_color=no_color):
+                result = subprocess.run(
+                    ["script", "-qec", command, "-E", "never", "/dev/null"],
+                    input="x\x1b[B\x1b[A\x1b[A\n", text=True, capture_output=True,
+                    cwd=self.home, env=dict(self.env, TERM="xterm", NO_COLOR=no_color),
+                    check=True, timeout=5)
+                initial, updates = result.stdout.split("Enter to select", 1)
+                self.assertIn(" > Setup", initial)
+                self.assertNotIn("\x1b[2J", updates)
+                self.assertNotIn("Main menu", updates)
+                self.assertNotIn("Enter to select", updates)
+                self.assertEqual(updates.count(" > Table of contents"), 1)
+                self.assertEqual(updates.count(" > Setup"), 1)
+                self.assertEqual(updates.count(" > Exit"), 1)
+                # How to play is untouched until the list scrolls on wraparound.
+                self.assertEqual(updates.count("How to play"), 1)
+                self.assertEqual("\x1b[7;1m" in updates, not no_color)
 
     def exercise_navigation(self, shell):
         self.env["LAB_SHELL"] = shell

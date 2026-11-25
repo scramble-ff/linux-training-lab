@@ -141,5 +141,13 @@ Use these numbers in the table of contents or with setup --jump N.
     Filter 64 permission requests and change modes on approved files only.
     The grader checks the modes of every route file.
 
+39  Audit the overnight permission changes
+    Compare fictional mode inventories and maintenance tickets to distinguish
+    an unapproved SUID change from approved and preexisting access.
+
+40  The shipment that will not import
+    Inspect invisible bytes and repair a manifest while preserving exact
+    destination names, record order, and the rejected original.
+
 Challenges 28–32 form the scripting block. The puzzle track starts at
 challenge 33.
