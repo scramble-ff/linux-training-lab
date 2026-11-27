@@ -1,11 +1,23 @@
 
+# Keep shell options, traps and exits inside the runner even if it is sourced.
+if [ -n "${ZSH_VERSION:-}" ] && [ "${ZSH_EVAL_CONTEXT##*:}" = file ]; then
+    bash "${(%):-%x}" "$@"
+    return $?
+fi
+if [[ -n ${BASH_VERSION:-} && ${BASH_SOURCE[0]} != "$0" ]]; then
+    bash "${BASH_SOURCE[0]}" "$@"
+    return $?
+fi
+
 set -euo pipefail
+launch_umask=$(umask)
 umask 077
 
 root="$HOME/.linux-training-lab"
 state_dir="$root"
 launch_save="$(pwd -P)/beginnix-progress.txt"
-checkpoint_header=BEGINNIX-CHECKPOINT-2
+checkpoint_header=BEGINNIX-CHECKPOINT-3
+previous_header_v2=BEGINNIX-CHECKPOINT-2
 legacy_header=BEGINNIX-CHECKPOINT-1
 
 menu_guide() {
@@ -21,11 +33,14 @@ In a lesson     Read the README, then type Linux commands at
                 the shell prompt. Type bn current to reread the task.
 Found a flag?   Type submit, press Enter, paste the whole flag and press
                 Enter again. For a free hint, type bn hint.
+Built something? Run bn submit to grade the files, process, or script.
+Found a value?  Type submit and enter the requested finding at the prompt.
+                Every lesson ends with a How to submit section.
 Puzzles         Use bn check for objective feedback and bn submit to finish.
 Fresh attempt   Use bn restart to preview a reset of the active lesson.
 Next lesson     After a correct submission, choose Move, Stay, or Always move.
                 If you stay, bn current shows how to reach the next lesson.
-Take a break    Type exit at the lesson prompt to return to the menu.
+Take a break    Type menu at the lesson prompt to return to the main menu.
                 Choose Exit to keep working on this machine later, or
                 Save and quit to also export your main course progress.
 
@@ -43,18 +58,18 @@ usage() {
     cat <<'HELP'
 
 At the lesson prompt
-  submit 'FLAG{...}'    Submit a flag directly. Plain submit prompts for it.
+  submit                        Grade your work or prompt for the requested answer.
   bn current   (-c, --current)   Show the active lesson and its folder.
   bn hint      (-H, --hint)      Get a free hint.
   bn answer    (-a, --answer)    Open the walkthrough and mark this attempt as assisted.
-  bn submit    (-s, --submit)    Submit a discovery flag or finish a puzzle without one.
-  bn stats     (-S, --stats)     Open Neon Arcade. Add --details for the puzzle checklist.
+  bn submit    (-s, --submit)    Grade the current task. Add the requested answer for a discovery.
+  bn stats     (-S, --stats)     Open Player Stats. Add --details for the puzzle checklist.
   bn save      (-w, --save)      Export this run. Optionally give a filename.
   bn check                      Check the active work without advancing.
   bn restart                    Preview the active lesson reset and backup.
   bn move ask | always          Set the after-submission navigation preference.
   bn help      (-h, --help)      Show this guide.
-  exit                          Leave the lesson shell for the main menu.
+  menu (or bn menu)             Return to the main menu and keep your work.
 
 Hints, checks and retries are free. Guided lessons record independent or
 walkthrough completion. Puzzles track named objectives once per skill;
@@ -147,6 +162,26 @@ init_state() {
     touch -- "$state_dir/.expanded-search-fixtures" "$state_dir/.lesson-prompts-v31"
 }
 
+lesson_heading() {
+    local color='' reset=''
+    if [[ -t 1 && ${TERM:-dumb} != dumb && -z ${NO_COLOR:-} ]]; then
+        color=$'\033[1;96m' reset=$'\033[0m'
+    fi
+    printf '\n%s── %s ──%s\n' "$color" "$1" "$reset"
+}
+
+display_lesson() {
+    local line title
+    {
+        IFS= read -r title || return 1
+        lesson_heading "$(printf 'Challenge %02d of %d · %s' "$(challenge_position "$current")" "$total" "$title")"
+        while IFS= read -r line; do
+            if [[ "$line" == 'Suggested commands' || "$line" == 'How to submit' ]]; then lesson_heading "$line"
+            else printf '%s\n' "$line"; fi
+        done
+    } < "$1/README.txt"
+}
+
 show_current() {
     local destination
     if [[ "$state_dir" != "$root" ]]; then
@@ -161,11 +196,10 @@ show_current() {
         return
     fi
     destination=$(folder "$current")
-    printf '\nChallenge %02d of %d\n\n' "$(challenge_position "$current")" "$total"
     if [[ "$PWD" != "$destination" ]]; then
         printf 'To enter the challenge folder, run\n  cd %q\n\n' "$destination"
     fi
-    cat "$destination/README.txt"
+    display_lesson "$destination"
 }
 
 require_install() {
@@ -192,6 +226,9 @@ install_runner() {
 # returns to the lesson shell. Each open terminal has its own notification.
 _bn_after_submit() {
     local previous_status=$? destination choice
+    [[ ${BEGINNIX_LESSON_PID:-} == "$$" && -n ${BEGINNIX_TERMINAL_DIR:-} ]] || return "$previous_status"
+    if [[ ! -d "$BEGINNIX_TERMINAL_DIR" ]]; then unset HISTFILE; exit 0; fi
+    if [[ -f "$BEGINNIX_TERMINAL_DIR/menu" ]]; then exit 0; fi
     if [[ -f "$BEGINNIX_TERMINAL_DIR/restart" ]]; then
         destination=$(< "$BEGINNIX_TERMINAL_DIR/restart")
         rm -f -- "$BEGINNIX_TERMINAL_DIR/restart" "$BEGINNIX_TERMINAL_DIR/next"
@@ -215,26 +252,34 @@ _bn_after_submit() {
     cd -- "$destination" && command beginnix current
 }
 
+menu() { command beginnix menu "$@"; }
+
 submit() {
-    if [ "$#" -eq 0 ]; then
-        command beginnix submit --prompt
-    else
-        command beginnix submit "$@"
+    local response
+    if [[ $# == 0 && ! -t 0 ]] && IFS= read -r response && [[ -n "$response" ]]; then
+        set -- "$response"
     fi
+    command beginnix submit "$@"
 }
 COMMANDS
     cat > "$root/.zshrc" <<'ZSHRC'
 source "$ZDOTDIR/commands.sh"
 precmd_functions+=(_bn_after_submit)
+PROMPT='[BEGINNIX LAB] %~
+%# '
+if [[ -t 2 && ${TERM:-dumb} != dumb && -z ${NO_COLOR:-} ]]; then
+    PROMPT='%K{magenta}%F{white}%B[BEGINNIX LAB]%b%f%k %B%F{cyan}%~%f%b
+%# '
+fi
 unset ZDOTDIR
 ZSHRC
     cat > "$root/bashrc" <<'BASHRC'
 source "$HOME/.linux-training-lab/commands.sh"
 PROMPT_COMMAND+=(_bn_after_submit)
 set -o emacs
-PS1='[beginnix] \w\n\$ '
+PS1='[BEGINNIX LAB] \w\n\$ '
 if [[ -t 2 && ${TERM:-dumb} != dumb && -z ${NO_COLOR:-} ]]; then
-    PS1='\[\e[1;36m\][beginnix]\[\e[0m\] \[\e[1;34m\]\w\[\e[0m\]\n\$ '
+    PS1='\[\e[1;97;45m\][BEGINNIX LAB]\[\e[0m\] \[\e[1;96m\]\w\[\e[0m\]\n\$ '
     alias ls='ls --color=auto'
 fi
 BASHRC
@@ -248,7 +293,7 @@ elapsed_seconds() {
 }
 
 save_checkpoint() {
-    local path lab_path temporary previous_header start_id saved_current challenge revealed=,
+    local path lab_path temporary previous_header start_id saved_current challenge revealed=, hinted=,
     path=$(realpath -m -- "${1:-$HOME/beginnix-progress.txt}")
     lab_path=$(realpath -m -- "$root")
     if [[ "$path" == "$lab_path" || "$path" == "$lab_path/"* ]]; then
@@ -256,7 +301,7 @@ save_checkpoint() {
     fi
     if [[ -e "$path" ]]; then
         if [[ ! -f "$path" ]] || ! IFS= read -r previous_header < "$path" ||
-           [[ "$previous_header" != "$checkpoint_header" && "$previous_header" != "$legacy_header" ]]; then
+           [[ "$previous_header" != "$checkpoint_header" && "$previous_header" != "$previous_header_v2" && "$previous_header" != "$legacy_header" ]]; then
             fail 'That path already exists. Choose a new checkpoint filename.'
         fi
     fi
@@ -264,6 +309,7 @@ save_checkpoint() {
     saved_current=$current
     if (( current > total )); then saved_current=0; fi
     for challenge in "${course_order[@]}"; do
+        if [[ -f "$state_dir/.hint-$challenge" ]]; then hinted+="$challenge,"; fi
         if [[ -f "$state_dir/.answer-$challenge" ]]; then
             revealed+="$challenge,"
         fi
@@ -274,7 +320,7 @@ save_checkpoint() {
         printf '%s\n' "$checkpoint_header"
         printf '%s %s %s %s %s %s %s %s\n' \
             "$seed" "$(elapsed_seconds)" "$saved_current" "$score" "$mistakes" "$attempts" "$start_id" "$finished"
-        printf '%s\n' "$revealed" "$earned" "$reassessed"
+        printf '%s\n' "$revealed" "$earned" "$reassessed" "$hinted"
     } > "$temporary"
     mv -fT -- "$temporary" "$path"
     printf 'Checkpoint saved to %s\n' "$path"
@@ -286,21 +332,22 @@ read_checkpoint() {
     local list_pattern='^,([1-9][0-9]{0,2},)*$'
     local invalid='That file is not a valid Beginnix progress checkpoint.'
     [[ -f "$path" && -r "$path" ]] || fail "Cannot read checkpoint: $path"
-    earned=, reassessed=,
+    earned=, reassessed=, checkpoint_hinted=,
     if ! {
         IFS= read -r header &&
         read -r seed elapsed current score mistakes attempts start_id finished extra &&
         IFS= read -r checkpoint_revealed &&
         { [[ "$header" == "$legacy_header" ]] || { IFS= read -r earned && IFS= read -r reassessed; }; } &&
+        { [[ "$header" != "$checkpoint_header" ]] || IFS= read -r checkpoint_hinted; } &&
         ! IFS= read -r extra_line && [[ -z "$extra_line" ]]
     } < "$path"; then
         fail "$invalid"
     fi
-    [[ ( "$header" == "$checkpoint_header" || "$header" == "$legacy_header" ) && -z "$extra" &&
+    [[ ( "$header" == "$checkpoint_header" || "$header" == "$previous_header_v2" || "$header" == "$legacy_header" ) && -z "$extra" &&
        "$seed" =~ ^[0-9a-f]{32}$ && "$elapsed" =~ $number_pattern &&
        "$current" =~ $number_pattern && "$score" =~ $number_pattern &&
        "$mistakes" =~ $number_pattern && "$attempts" =~ $number_pattern &&
-       "$finished" =~ $list_pattern && "$checkpoint_revealed" =~ $list_pattern ]] ||
+       "$finished" =~ $list_pattern && "$checkpoint_revealed" =~ $list_pattern && "$checkpoint_hinted" =~ $list_pattern ]] ||
         fail "$invalid"
     first_challenge=$(challenge_position "$start_id" 2>/dev/null) || fail "$invalid"
 
@@ -316,8 +363,9 @@ read_checkpoint() {
         position=$(challenge_position "$current" 2>/dev/null) || fail "$invalid"
         ! is_solved "$current" || fail "$invalid"
     fi
-    IFS=, read -r -a revealed <<< "${checkpoint_revealed#,}"
+    IFS=, read -r -a revealed <<< "${checkpoint_revealed#,}${checkpoint_hinted#,}"
     for challenge in "${revealed[@]}"; do
+        challenge_position "$challenge" >/dev/null || fail "$invalid"
         [[ "$challenge" == "$current" ]] || is_solved "$challenge" || fail "$invalid"
     done
     local key id index
@@ -352,6 +400,8 @@ restore_checkpoint() {
     for challenge in "${revealed[@]}"; do
         touch -- "$state_dir/.answer-$challenge"
     done
+    IFS=, read -r -a revealed <<< "${checkpoint_hinted#,}"
+    for challenge in "${revealed[@]}"; do touch -- "$state_dir/.hint-$challenge"; done
     save_state
     touch -- "$state_dir/.expanded-search-fixtures" "$state_dir/.lesson-prompts-v31"
 }
@@ -511,7 +561,7 @@ choose_row() {
 }
 
 in_lesson_terminal() {
-    [[ -t 0 && -t 1 && ${BEGINNIX_TERMINAL_DIR:-} == "$state_dir"/.terminal.?????? &&
+    [[ -t 1 && ${BEGINNIX_TERMINAL_DIR:-} == "$state_dir"/.terminal.?????? &&
        -d "$BEGINNIX_TERMINAL_DIR" && ! -L "$BEGINNIX_TERMINAL_DIR" ]]
 }
 
@@ -531,16 +581,21 @@ start_shell() (
         printf '\033[2J\033[H'
         if [[ "$state_dir" != "$root" ]]; then printf 'Practice session\n\n'; fi
     fi
-    cat -- README.txt || return 1
-    printf '\nbn hint for help, bn check to review work, exit for the menu.\n'
+    display_lesson "$PWD" || return 1
+    printf '\nbn hint for help, bn check to review work, menu to return to the main menu.\n'
     BEGINNIX_TERMINAL_DIR=$(mktemp -d -- "$state_dir/.terminal.XXXXXX") || return 1
     export BEGINNIX_TERMINAL_DIR
     trap 'rm -rf -- "$BEGINNIX_TERMINAL_DIR"' EXIT
-    if [[ "$selected_shell" == bash ]]; then
-        "$shell_path" --noprofile --rcfile "$root/bashrc" -i
-    else
-        ZDOTDIR="$root" "$shell_path" -d -i
-    fi
+    # Bind prompt actions to this particular interactive shell.
+    (
+        export BEGINNIX_LESSON_PID=$BASHPID
+        if [[ "$selected_shell" == bash ]]; then
+            exec "$shell_path" --noprofile --rcfile "$root/bashrc" -i
+        else
+            export ZDOTDIR="$root"
+            exec "$shell_path" -d -i
+        fi
+    )
 )
 
 setup_install() {
@@ -629,10 +684,14 @@ teardown_lab() {
 
 choose_lesson() {
     local section pos id mark end
-    local -a labels
+    local -a labels section_labels
+    for section in "${!sections[@]}"; do
+        printf -v 'section_labels[section]' '(%02d–%02d) %s' "${section_starts[section]}" \
+            "$((section_starts[section+1]-1))" "${sections[section]}"
+    done
     number=0
     while :; do
-        choose_row 'Table of contents — choose a section' "${sections[@]}" 'Back'
+        choose_row 'Table of contents — choose a section' "${section_labels[@]}" 'Back'
         section=$pick
         (( section < ${#sections[@]} )) || return 0
         end=${section_starts[section+1]}
@@ -646,7 +705,7 @@ choose_lesson() {
             fi
             labels+=("$(printf '[%s] %02d  %s' "$mark" "$pos" "${lesson_titles[id]}")")
         done
-        choose_row "${sections[section]}" "${labels[@]}" 'Back'
+        choose_row "${section_labels[section]}" "${labels[@]}" 'Back'
         if (( pick < ${#labels[@]} )); then number=$((section_starts[section]+pick)); return; fi
     done
 }
@@ -674,7 +733,10 @@ lab_menu() {
             refresh_lesson_prompts
             if [[ "$state_dir" != "$root" ]]; then remember_practice; fi
             exec 9<&-
-            if (( current <= total )); then start_shell || :; else notice='All lessons in this run are complete.'; fi
+            if (( current <= total )); then
+                start_shell || :
+                installed || break
+            else notice='All lessons in this run are complete.'; fi
         fi
         enter_first=0
         state_dir=$root
@@ -761,8 +823,7 @@ lab_menu() {
                 choose_row 'Delete the lab, practice sessions and archived labs? Exported checkpoints are kept.' 'Cancel' 'Delete lab'
                 if (( pick == 1 )); then
                     teardown_lab
-                    [[ -f "${BASH_SOURCE[0]}" ]] || break
-                    notice='Lab removed.'
+                    break
                 fi
                 ;;
             'Continue course'*) enter_first=1 ;;
@@ -825,6 +886,7 @@ show_hint() {
     if (( current > total )); then
         printf 'All challenges are complete.\n'
     else
+        touch -- "$state_dir/.hint-$current"
         lesson_text "$current" hint
     fi
 }
@@ -833,17 +895,29 @@ show_answer() {
     printf 'Walkthrough opened. This completion will be recorded as assisted.\n'
     printf '\nStart in the challenge folder\n  cd %q\n\n' "$(folder "$current")"
     lesson_text "$current" answer
-    puzzle_objectives "$current"
-    if (( ${#objectives[@]} )); then
-        printf '\nUse bn check to review the objectives, then bn submit to finish.\n'
-    else
-        printf "\nAfter completing the steps, submit the flag\n  beginnix submit '%s'\n" "$(flag "$current")"
-    fi
+    local prompt
+    prompt=$(answer_prompt "$current")
+    case "$prompt" in
+        'Paste flag') printf "\nSubmit the recovered flag with bn submit '%s'\n" "$(flag "$current")" ;;
+        '') printf '\nUse bn check to review your work, then bn submit to finish.\n' ;;
+        *) printf '\nSubmit the finding with bn submit %s\n' "$(finding_answer "$current")" ;;
+    esac
 }
 
 main() {
     if (( $# == 0 )) && [[ ! -t 0 || ! -t 1 ]]; then usage; return; fi
     case "${1:-setup}" in
+        menu)
+            [[ $# == 1 ]] || fail 'Usage: bn menu'
+            if [[ -n ${LINUX_LAB_PRACTICE_ID:-} ]] && valid_practice "$LINUX_LAB_PRACTICE_ID"; then
+                state_dir="$root/.practice.$LINUX_LAB_PRACTICE_ID"
+            fi
+            if in_lesson_terminal; then
+                touch -- "$BEGINNIX_TERMINAL_DIR/menu"
+                return
+            fi
+            set -- setup
+            action=setup ;;
         --import-launch-save) import_course; return ;;
         help|-h|--help) action=help ;;
         setup|-i|--setup) action=setup ;;
@@ -895,6 +969,16 @@ main() {
                 create_practice "$start_position"
             fi
             lab_menu "$explicit_start"
+            # A terminal can run the launcher itself as its session leader.
+            # In that case there is no previous shell to receive control.
+            if [[ -t 0 && -t 1 ]] && (( $$ == $(ps -o sid= -p "$$") )); then
+                local login_shell=${SHELL:-/bin/bash}
+                [[ -x "$login_shell" && -f "$login_shell" ]] || login_shell=/bin/bash
+                umask "$launch_umask"
+                unset LINUX_LAB_PRACTICE_ID
+                if [[ ! -d "$PWD" ]]; then cd -- "$HOME"; fi
+                exec "$login_shell" -i
+            fi
             ;;
         teardown|current|hint|answer|stats|submit|save|check|restart|move)
             if [[ "$action" == teardown ]]; then
@@ -949,8 +1033,11 @@ main() {
                         printf 'Ready. Use bn submit to finish.\n'
                     else
                         case "$current" in
-                            1|2|3|4|5|6) printf 'Discovery lesson. Find or build the flag, then use submit.\n' ;;
-                            *) check_practice "$current"; printf 'Work checks passed. Submit your flag to finish.\n' ;;
+                            1|2|3|4|5|6|16) submission_instructions "$current" ;;
+                            *)
+                                check_practice "$current"
+                                printf 'Work checks passed.\n'
+                                submission_instructions "$current" ;;
                         esac
                     fi ;;
                 save)
@@ -960,46 +1047,60 @@ main() {
                 submit)
                     puzzle_objectives "$current"
                     (( current <= total )) || fail 'All challenges are already complete.'
-                    if [[ $# == 2 && "$2" == --prompt ]]; then
-                        if (( ${#objectives[@]} )); then
-                            set -- submit
-                        else
-                            exec 9<&-
-                            printf 'Paste flag (Enter to cancel): ' >&2
-                            IFS= read -r flag_text || return 1
-                            [[ -n "$flag_text" ]] || return 0
-                            exec bash "${BASH_SOURCE[0]}" submit "$flag_text"
-                        fi
+                    local prompt answer expected
+                    prompt=$(answer_prompt "$current")
+                    shift
+                    if [[ $# == 1 && "$1" == --prompt ]]; then shift; fi
+                    if (( $# == 0 )) && [[ -n "$prompt" ]]; then
+                        exec 9<&-
+                        if [[ -t 0 ]]; then printf '%s (Enter to cancel): ' "$prompt" >&2; fi
+                        IFS= read -r answer || return 1
+                        [[ -n "$answer" ]] || return 0
+                        exec bash "${BASH_SOURCE[0]}" submit "$answer"
                     fi
-                    [[ ( $# == 1 && ${#objectives[@]} -gt 0 ) || ( $# == 2 && -n "$2" ) ]] || fail "Usage: bn submit 'FLAG{...}'"
-                    for previous in "${course_order[@]}"; do
-                        if is_solved "$previous" && [[ "${2:-}" == "$(flag "$previous")" ]]; then
-                            fail 'That flag was already accepted.'
+                    answer="$*"
+                    if [[ "$answer" == FLAG\{* ]]; then
+                        # Older installs supplied a flag even for graded work.
+                        expected=$(flag "$current")
+                        if [[ "$answer" != "$expected" ]]; then
+                            for previous in "${course_order[@]}"; do
+                                if is_solved "$previous" && [[ "$answer" == "$(flag "$previous")" ]]; then
+                                    fail 'That flag was already accepted.'
+                                fi
+                            done
                         fi
-                    done
-                    if [[ $# == 2 && "$2" != "$(flag "$current")" ]]; then
+                    elif [[ "$prompt" == 'Paste flag' ]]; then
+                        expected=$(flag "$current")
+                    elif [[ -n "$prompt" ]]; then
+                        expected=$(finding_answer "$current")
+                    else
+                        (( $# == 0 )) || fail 'For this task, run bn submit with no arguments.'
+                        expected=''
+                    fi
+                    if [[ "$answer" != "$expected" ]]; then
                         mistakes=$(( mistakes + 1 ))
                         attempts=$(( attempts + 1 ))
                         save_state
-                        printf 'Incorrect flag. Try again or use bn hint. Retries are free.\n' >&2
-                        exit 1
+                        fail 'Incorrect answer. Try again or use bn hint. Retries are free.'
                     fi
                     if (( ${#objectives[@]} )); then grade_puzzle || return 1
-                    else check_practice "$current"; fi
+                    elif [[ "$current" != 16 || "$answer" == FLAG\{* ]]; then check_practice "$current"; fi
                     solved=$current
                     finished+="$solved,"
                     current=$(next_challenge)
                     attempts=0
                     save_state
+                    lesson_heading "Challenge $(printf '%02d' "$(challenge_position "$solved")") complete"
                     if [[ -f "$state_dir/.answer-$solved" ]]; then printf 'Completed with walkthrough. '
                     else printf 'Completed independently. '; fi
                     printf 'Progress saved.\n'
                     record_independent_replay "$solved"
+                    lesson_heading "What you practiced"
                     lesson_text "$solved" debrief
                     prepare_active_lesson_if_missing
                     if (( current > total )); then
                         show_current
-                        printf '\nType exit to return to the main menu.\n'
+                        printf '\nType menu to return to the main menu.\n'
                     elif in_lesson_terminal; then
                         notify_lesson_terminal next
                     else

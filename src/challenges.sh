@@ -3,7 +3,39 @@ latest_dispatch_warning=TICKET-2165
 route_samples=64
 
 write_intro() {
-    lesson_text "$1" intro > "$2/README.txt"
+    {
+        lesson_text "$1" intro
+        printf '\nHow to submit\n'
+        submission_instructions "$1"
+    } > "$2/README.txt"
+}
+
+# An empty prompt means the grader can inspect the completed work directly.
+answer_prompt() {
+    case "$1" in
+        1|2|3|4|7|17|18) printf 'Paste flag' ;;
+        5) printf 'First parcel ID and distinct count, separated by a space' ;;
+        6) printf 'Two option letters (without dashes) and count, separated by spaces' ;;
+        16) printf 'Numeric local port' ;;
+    esac
+}
+
+finding_answer() {
+    case "$1" in
+        5) printf 'BOX-%04d %d' "$(first_ready_parcel)" "$ready_parcels" ;;
+        6) printf 'r c 3' ;;
+        16) printf '9100' ;;
+    esac
+}
+
+submission_instructions() {
+    local prompt
+    prompt=$(answer_prompt "$1")
+    case "$prompt" in
+        'Paste flag') printf 'Type submit, press Enter, then paste the whole FLAG{...} and press Enter.\n' ;;
+        '') printf 'Run bn submit with no arguments. It checks your work and completes the lesson if it passes.\n' ;;
+        *) printf 'Type submit and press Enter. At the prompt, give the following answer:\n  %s.\n' "$prompt" ;;
+    esac
 }
 
 expand_search_fixture() {
@@ -22,9 +54,9 @@ expand_search_fixture() {
 
 prepare() {
     local id=$1 destination=${2:-$(folder "$1")} variant=0
+    mkdir -p -- "$destination"
     case "$id" in
         27|28|29|30|37|38|39|40)
-            mkdir -p -- "$destination"
             variant=$(puzzle_variant)
             touch -- "$destination/.seeded-puzzle" ;;
     esac
@@ -42,34 +74,26 @@ prepare() {
         5) write_scan_challenge "$destination" ;;
         6|16) write_observation_fixture "$id" "$destination" ;;
         7)
-            mkdir -p "$destination"
             printf '%s\n' "$(flag 7)" > "$destination/delivery-note.txt"
             chmod 200 "$destination/delivery-note.txt"
             ;;
         8)
-            mkdir -p "$destination"
-            printf '%s\n' "$(flag 8)" > "$destination/source.txt"
+            printf '%s\n' 'Route sheet for the morning shift' > "$destination/source.txt"
             ;;
         9) write_shift_notes "$destination" ;;
-        14)
-            write_dispatch_card "$id" "$destination"
-            write_parcels "$destination"
-            ;;
+        14) write_parcels "$destination" ;;
         17) write_recent_dispatch "$destination" ;;
         18) write_mystery_parcels "$destination" ;;
         20)
-            write_dispatch_card "$id" "$destination"
             printf 'Morning manifest\n' > "$destination/manifest.txt"
             printf 'Afternoon manifest\n' > "$destination/draft.txt"
             ;;
         21)
-            write_dispatch_card "$id" "$destination"
             mkdir -p "$destination/scratch"
             touch "$destination/scratch/old-a.txt" "$destination/scratch/old-b.txt"
             printf 'Keep this receipt\n' > "$destination/keep.txt"
             ;;
         22)
-            write_dispatch_card "$id" "$destination"
             mkdir -p "$destination/delivery batch" "$destination/selected"
             printf 'East route sheets\n' > "$destination/delivery batch/route east.txt"
             printf 'West route sheets\n' > "$destination/delivery batch/route west.txt"
@@ -77,7 +101,6 @@ prepare() {
             printf 'Departure schedule\n' > "$destination/delivery batch/schedule.txt"
             ;;
         24)
-            write_dispatch_card "$id" "$destination"
             cat > "$destination/check-in.sh" <<'CHECK'
 #!/usr/bin/env bash
 printf 'Station online\n'
@@ -85,20 +108,10 @@ printf 'Parcel label missing\n' >&2
 CHECK
             ;;
         27) write_dispatch_packet "$destination" ;;
-        28)
-            write_dispatch_card "$id" "$destination"
-            write_hold_audit "$destination"
-            ;;
-        29)
-            write_dispatch_card "$id" "$destination"
-            write_intake_audit "$destination"
-            ;;
-        30)
-            write_dispatch_card "$id" "$destination"
-            write_handoff_archive "$destination"
-            ;;
+        28) write_hold_audit "$destination" ;;
+        29) write_intake_audit "$destination" ;;
+        30) write_handoff_archive "$destination" ;;
         35)
-            write_dispatch_card "$id" "$destination"
             local row dock status
             for (( row=1; row<=64; row++ )); do
                 case $(( row % 4 )) in
@@ -111,7 +124,6 @@ CHECK
             done > "$destination/incoming.txt"
             ;;
         36)
-            write_dispatch_card "$id" "$destination"
             local row status
             for (( row=1; row<=64; row++ )); do
                 status=WAIT
@@ -119,21 +131,14 @@ CHECK
                 printf 'BOX-%03d|%s\n' "$(( (row-1) % 32 + 1 ))" "$status"
             done > "$destination/updates.txt"
             ;;
-        37)
-            write_dispatch_card "$id" "$destination"
-            write_timeline_challenge "$destination"
-            ;;
-        38)
-            write_dispatch_card "$id" "$destination"
-            write_access_challenge "$destination"
-            ;;
+        37) write_timeline_challenge "$destination" ;;
+        38) write_access_challenge "$destination" ;;
         39) write_mode_inventory "$destination" ;;
         40)
             manifest_rows rejected > "$destination/rejected.txt"
             printf 'parcel|destination\nPK-0000|East Gate\n' > "$destination/example.txt"
             printf 'Intake failed: unexpected byte at end of header. Import stopped before row validation.\n' > "$destination/import.log"
             ;;
-        *) write_dispatch_card "$id" "$destination" ;;
     esac
     expand_search_fixture "$id" "$destination"
     write_intro "$id" "$destination"
@@ -266,12 +271,6 @@ check_practice() {
             fi
             ;;
     esac
-}
-
-write_dispatch_card() {
-    local id=$1 destination=$2
-    mkdir -p "$destination"
-    printf '%s\n' "$(flag "$id")" > "$destination/dispatch.txt"
 }
 
 digest_for() {
@@ -445,11 +444,7 @@ write_shift_notes() {
         printf 'Dispatch shift notes\n\n'
         for (( bay=1; bay<=16; bay++ )); do
             printf 'BAY-%02d\nstatus=waiting\n' "$bay"
-            case "$bay" in
-                7) printf 'flag=%s\n' "$(flag 9)" ;;
-                14) printf 'flag=%s\n' "$(flag decoy-9)" ;;
-                *) printf 'note=Awaiting a dispatch update.\n' ;;
-            esac
+            printf 'note=Awaiting a dispatch update.\n'
             printf '\n'
         done
     } > "$destination/shift-notes.txt"
@@ -551,7 +546,6 @@ write_observation_fixture() {
     if [[ "$id" == 6 ]]; then
         printf '%s\n' 'INFO opened' 'WARN delayed' 'INFO queued' 'WARN retry' 'WARN returned' > "$destination/dispatch.log"
     else
-        write_dispatch_card 16 "$destination"
         cat > "$destination/sockets.txt" <<'SOCKETS'
 State   Recv-Q Send-Q Local Address:Port  Peer Address:Port
 LISTEN  0      128    0.0.0.0:8080        0.0.0.0:*
@@ -670,7 +664,6 @@ write_dispatch_packet() {
     local -a decisions=(HOLD REJECTED NOT_APPROVED)
     mkdir -p "$destination/records"
     printf '%s\n' north-route.txt west-route.txt > "$destination/reference-manifest.txt"
-    printf '%s\n' "$(flag 27)" > "$destination/dispatch.txt"
     {
         printf 'shift|decision|route|revision\n'
         for route_index in "${!routes[@]}"; do
@@ -926,11 +919,20 @@ lesson_text() {
         1:intro) cat <<'PROMPT' ;;
 Find your bearings
 
-The supply crew left a note in the supplies directory. Find note.txt,
-read it, and submit the entire flag with beginnix submit.
+The supply crew left you a note. You start in the lesson folder.
+Type each command at the prompt and press Enter.
 
-Suggested commands
-  pwd  ls  cd  cat
+1. Type ls to list the files and folders here. Look for supplies.
+2. Type cd supplies to enter that folder. cd means "change directory."
+   If it succeeds, it usually prints nothing. Type pwd to see where you are.
+3. Type ls again. This time it lists the contents of supplies.
+   Type cat note.txt to read the note on your screen.
+4. Type submit and press Enter. At the flag prompt, paste the entire
+   flag from the note, including FLAG and both braces, then press Enter.
+
+Want to know what else a command can do? Many commands accept --help.
+Try ls --help to see how to use ls and what its options do. In Bash,
+type help cd to read about cd.
 PROMPT
         1:hint) printf 'Once you reach the supplies directory, look for a way to display a file in the terminal.\n' ;;
         1:answer) cat <<'ANSWER' ;;
@@ -965,6 +967,10 @@ The dispatch team left a flag on ticket TICKET-1042. Search the .log
 files under records and submit the flag on that ticket's line. Other
 tickets may have flags of their own.
 
+Start with find records -name '*.log'. The quotes let find apply the
+pattern inside each folder. Pick a returned path and run grep -n 'TICKET-'
+followed by that path to see matching lines and their line numbers.
+
 Suggested commands
   find  grep
 PROMPT
@@ -982,6 +988,10 @@ Open the shipment
 Three files arrived from dispatch. Open routing.txt.gz to find the
 first handoff. Follow the notes until you can read the receipt and
 submit its flag.
+
+For an archive named example.tar, tar -tf example.tar lists its members
+before you unpack it. Change t to x to extract them. In both commands,
+f means the next argument names the archive.
 
 Suggested commands
   ls  file  gzip  bzip2  tar  unzip  cat  man
@@ -1006,9 +1016,12 @@ only records whose zone is NORTH and whose status is READY.
 Find the alphabetically first parcel ID and count the distinct parcel
 IDs in those records.
 
-Combine your findings as FLAG{PARCEL_COUNT}. For example, if the
-first ID were BOX-0123 and there were 7 distinct IDs, you would submit
-FLAG{BOX-0123_7}.
+Try printf '%s\n' 'desk|OPEN' | awk -F '|' '{print $2}'. It prints OPEN.
+-F sets the field separator and $2 selects the second field. Read the
+header of scans.txt to see which fields you need.
+
+For example, if the first ID were BOX-0123 and there were 7 distinct
+IDs, you could run bn submit BOX-0123 7.
 
 Suggested commands
   head  grep  cut  awk  sort  wc  man
@@ -1019,7 +1032,7 @@ PROMPT
   head -n 1 ready-ids.txt
   wc -l ready-ids.txt
 
-Use the first ID and the distinct count in that order, with an underscore.
+Use the first ID and the distinct count in that order, separated by a space.
 ANSWER
         5:debrief) printf 'A pipe passes output to the next command. cut can select fields, awk can filter records by field, sort can order and deduplicate IDs, and wc can count lines.\n' ;;
         6:intro) cat <<'PROMPT' ;;
@@ -1031,8 +1044,10 @@ Dispatch needs the number of warning lines in dispatch.log.
    Find the short option that preserves literal backslashes.
 2. Use man grep or grep --help to find the short option that counts
    matching lines. Use it with the pattern '^WARN' on dispatch.log.
-3. Submit FLAG{letter-letter-count}, using the two option letters
-   without dashes, followed by the number your command printed.
+   The ^ means the start of a line: '^INFO' matches 'INFO opened'
+   and skips 'previous level: INFO'. Press q to leave the manual.
+3. Give the two option letters without dashes, then the count.
+   For example, for options -a and -b and a count of 5, enter a b 5.
 PROMPT
         6:hint) printf 'Search for “count” in the grep manual. The ^ in the pattern means start of line.\n' ;;
         6:answer) cat <<'ANSWER' ;;
@@ -1040,7 +1055,7 @@ PROMPT
   grep --help
   grep -c '^WARN' dispatch.log
 
-The options are -r and -c. Use the printed count as the last part of the flag.
+The options are -r and -c. Use the printed count as the third part of your answer.
 ANSWER
         6:debrief) printf 'Bash help documents builtins. grep counts matching lines, so two matches on the same line still count once.\n' ;;
         7:intro) cat <<'PROMPT' ;;
@@ -1050,6 +1065,10 @@ Dispatch left you a note named delivery-note.txt. Check its owner,
 group, and permissions. The owner can write to it but needs read
 access too. Add read permission for the owner and leave the other
 permissions as they are. Then read the note and submit its flag.
+
+For example, chmod u+r schedule.txt gives the owner of schedule.txt
+read access. The u selects the owner, + adds permission, and r means
+read. Use that pattern with the note's filename.
 
 Suggested commands
   stat  chmod  cat
@@ -1073,8 +1092,10 @@ Dispatch wants two names for the same route sheet, source.txt.
 2. Make a hard link named mirror to source.txt. Compare their inode
    numbers to see whether they refer to the same file.
 
-Read the flag through either link and submit it. Keep both links
-in this folder for the submission check.
+The argument order is ln existing-file new-name. Add -s to create a
+symbolic link. Try readlink shortcut to see its stored path. In ls -i
+output, the number before each name is its inode. Compare source.txt and
+mirror. Keep both links here for the grader.
 
 Suggested commands
   ln  readlink  ls  cat
@@ -1095,10 +1116,11 @@ Edit the shift notes
 
 Open shift-notes.txt in Vim and search for BAY-07. On the next line,
 change status=waiting to status=ready. Save the file and exit Vim.
-Submit the flag from the BAY-07 entry.
+Press Esc, type /BAY-07, and press Enter to jump to the entry.
+Move to the status line and press i to edit. When the text looks
+right, press Esc, type :wq, and press Enter to write the file and quit.
 
-If Vim isn't installed, you can use Neovim. If you're unsure which
-mode you're in, press Esc to return to Normal mode.
+If Vim isn't installed, you can use Neovim.
 
 Suggested commands
   vim  nvim
@@ -1118,7 +1140,7 @@ your current shell. Then start sh and check again. The shell variable
 $$ gives you the PID of the shell you're typing in. Look for how ps
 can display information about a single PID.
 
-Read the flag in dispatch.txt and submit it while you're still in sh.
+Run bn submit while you're still in sh.
 Afterward, use exit to return to your usual lab shell.
 
 Suggested commands
@@ -1130,7 +1152,7 @@ PROMPT
   sh
   ps -p "$$" -o comm=
 
-Enter the second ps command inside sh. Submit the flag there, then
+Enter the second ps command inside sh. Run bn submit there, then
 type exit to return to the parent shell.
 ANSWER
         10:debrief) printf 'ps reports information about running processes. $$ identifies the current shell. Starting sh opens a child shell, and exiting it returns you to the parent.\n' ;;
@@ -1142,7 +1164,11 @@ Create an SSH key pair for this exercise. Run ssh-keygen and enter
 
 Identify the public key, then use ssh-keygen to display its
 fingerprint. Save just the SHA256:... token on one line in
-fingerprint.txt. Read and submit the flag in dispatch.txt.
+fingerprint.txt.
+
+The public key has a .pub suffix. For a key named example.pub,
+ssh-keygen -lf example.pub displays its fingerprint. The number before
+the SHA256 token is the key size.
 
 Keep the private key in the lab folder. This task uses the fingerprint
 and runs entirely on your VM.
@@ -1168,8 +1194,10 @@ Put it in the background by ending its command with &. The shell
 shows a job number and a process ID (PID).
 
 Use ps to inspect that PID. Save only the PID in process-id.txt.
-Read the flag in dispatch.txt and submit it while sleep is still
-running. If it finishes first, start another and record its new PID.
+If the shell prints [1] 4821, 1 is the job number and 4821 is the PID.
+Right after starting the timer, try ps -p "$!". The shell replaces $!
+with the PID of the background job you just started. Look for sleep.
+Run bn submit while the timer is still running. If it finishes first, start another and record its new PID.
 
 Suggested commands
   sleep  ps  man  vim  nvim  cat
@@ -1192,8 +1220,7 @@ kernel release and the machine hardware name, also called the
 architecture.
 
 Write them in system-report.txt, one value per line. Put the kernel
-release first and the architecture second. Read and submit the flag
-in dispatch.txt.
+release first and the architecture second.
 
 Suggested commands
   uname  man  vim  nvim  cat
@@ -1213,9 +1240,13 @@ There are several parcel directories under parcels. Use df to identify
 the filesystem type that stores this challenge folder. Then use du
 to see which parcel directory uses the most disk space.
 
+Try df -T . and look under Type. The dot means your current folder.
+Try du -sk parcels/* for one total per parcel in KiB. Compare the
+numbers in the first column.
+
 In storage-report.txt, put the filesystem type on the first line.
 Put just the name of the largest parcel directory on the second
-line. Read and submit the flag in dispatch.txt.
+line.
 
 Suggested commands
   df  du  man  vim  nvim  cat
@@ -1238,7 +1269,7 @@ shown with a slash and a prefix length, such as 192.0.2.4/24.
 
 In network-report.txt, put the loopback interface name on the first
 line. Put its IPv4 address, including the slash and prefix length,
-on the second line. Read and submit the flag in dispatch.txt.
+on the second line.
 
 Suggested commands
   ip  man  vim  nvim  cat
@@ -1256,15 +1287,19 @@ ANSWER
 See what's listening
 
 Read sockets.txt, a captured TCP socket listing. Which listening socket is
-bound only to IPv4 loopback? Write its numeric local port in listener.txt.
-Use both the State and Local Address columns. Submit the flag in dispatch.txt.
+bound only to IPv4 loopback? Submit its numeric local port directly.
+
+For example, a LISTEN row with local address 127.0.0.1:4321 accepts
+loopback connections on port 4321. A listener on 0.0.0.0:4321 accepts
+connections on all local IPv4 interfaces. Read the Local Address column
+carefully: the Peer Address column can also contain a port.
 
 Optional: compare the capture with ss -ltn on your machine.
 PROMPT
         16:hint) printf 'Find a LISTEN row whose local address is 127.0.0.1. A wildcard address covers more interfaces.\n' ;;
         16:answer) cat <<'ANSWER' ;;
   cat sockets.txt
-  printf '%s\n' 9100 > listener.txt
+  # The LISTEN row bound to 127.0.0.1 has local port 9100.
 
 The wildcard listener accepts connections on other interfaces too. The
 ESTAB row is an existing connection.
@@ -1296,11 +1331,14 @@ ANSWER
         18:intro) cat <<'PROMPT' ;;
 Identify the mystery parcel
 
-Three parcels have the same .dat extension. Use file to find the
+The parcels share the .dat extension. Use file to find the
 one that contains gzip-compressed data. Write its original filename,
 including .dat, in parcel-name.txt.
 
-Read the contents of the gzip parcel and submit its flag.
+Read the contents of the gzip parcel and submit its flag. If gunzip
+reports an unknown suffix, copy the compressed parcel to a name ending
+in .gz and run gunzip on that copy. Keep the original .dat name for
+your report.
 
 Suggested commands
   file  gzip  gunzip  man  vim  nvim
@@ -1324,8 +1362,6 @@ Set up the staging area
 Dispatch needs a staging area. Create a directory named staging.
 Inside it, create an empty file called arrival.txt.
 
-Read and submit the flag in dispatch.txt once both are in place.
-
 Suggested commands
   mkdir  touch  ls  cat
 PROMPT
@@ -1342,8 +1378,6 @@ Copy and rename a manifest
 Make a copy of manifest.txt named backup.txt. Leave manifest.txt
 in place. Then rename draft.txt to ready.txt in this folder.
 
-Read and submit the flag in dispatch.txt when the files are ready.
-
 Suggested commands
   cp  mv  ls  cat
 PROMPT
@@ -1358,8 +1392,6 @@ Clear the scratch space
 
 Remove the two practice files inside scratch. Once the directory
 is empty, remove it too. Leave keep.txt in the challenge folder.
-
-Read and submit the flag in dispatch.txt.
 
 Suggested commands
   rm  rmdir  ls  cat
@@ -1378,9 +1410,9 @@ The directory delivery batch contains several files. Copy every
 file whose name starts with route and ends in .txt into selected.
 Keep the original files in place.
 
-Use quotes to handle the space in the directory name and try a
-shell wildcard to select all the matching sheets in one command.
-Read and submit the flag in dispatch.txt when you're done.
+Try ls 'delivery batch'/*.txt. The quotes keep the folder name together.
+The * sits outside the quotes so the shell can expand it into filenames.
+Narrow the pattern until ls shows only the sheets you want, then copy them.
 
 Suggested commands
   cp  ls  cat
@@ -1397,12 +1429,19 @@ ANSWER
         23:intro) cat <<'PROMPT' ;;
 Write and append a report
 
+Try these commands with a practice file:
+  printf '%s\n' 'Truck arrived' > practice.txt
+  printf '%s\n' 'Gate closed' >> practice.txt
+  cat practice.txt
+
+%s prints the supplied text and \n ends the line. The shell's > creates
+or replaces the file. >> adds to the end, keeping the first line.
+
 Use printf and shell redirection to write Shift opened as the
 first line of shift-report.txt. Run a second command to append
 Parcel received on the next line.
 
-Check that the report contains both lines in order, then read
-and submit the flag in dispatch.txt.
+Check that the report contains both lines in order.
 
 Suggested commands
   printf  cat
@@ -1417,19 +1456,30 @@ ANSWER
         24:intro) cat <<'PROMPT' ;;
 Separate output and errors
 
-Run check-in.sh with Bash. It prints a normal status and a
-separate error message.
+Run chmod u+x check-in.sh to give yourself permission to run the script.
+Here u means the file's owner, + adds a permission, and x means execute.
+You can now run it as ./check-in.sh from this folder.
+
+Programs have two output streams. Standard output (stdout, stream 1)
+carries results. Standard error (stderr, stream 2) carries diagnostics.
+Both normally appear on your screen. Try this example:
+
+  ls check-in.sh missing-example.txt 2> errors-example.txt | tee listed.txt
+
+ls lists the existing file on stdout. The pipe sends that list to tee,
+which shows it and saves it in listed.txt. The shell sends the error
+about the missing file to errors-example.txt. Use cat to compare them.
 
 Save the error in problems.txt. Use tee to save the normal status
-in reception.txt and still see it on your terminal. Read and
-submit the flag in dispatch.txt when both files are ready.
+in reception.txt and still see it on your terminal.
 
 Suggested commands
-  bash  tee  cat
+  chmod  tee  cat  ls
 PROMPT
         24:hint) printf 'Normal output and errors travel on separate streams. Send only errors straight to a file, and pass normal output to the command that can display and save it.\n' ;;
         24:answer) cat <<'ANSWER' ;;
-  bash check-in.sh 2> problems.txt | tee reception.txt
+  chmod u+x check-in.sh
+  ./check-in.sh 2> problems.txt | tee reception.txt
   cat problems.txt
 
 The shell redirects errors from Bash to problems.txt. The pipe
@@ -1440,8 +1490,9 @@ ANSWER
 Compare the manifests
 
 Compare yesterday.txt and today.txt. One parcel's status changed.
-Write just that parcel's ID in changed-parcel.txt, then read and
-submit the flag in dispatch.txt.
+Try diff -u yesterday.txt today.txt. Below the headers, a line starting
+with - shows the old record and + shows the new one. Read the parcel ID
+on that pair and write just the ID in changed-parcel.txt.
 
 Suggested commands
   diff  cat  vim  nvim
@@ -1461,7 +1512,9 @@ Some IDs in scans.txt appear on consecutive lines. Write one copy
 of each repeated group to duplicate-ids.txt, in the order they
 appear. Count neighboring repeats only.
 
-Read and submit the flag in dispatch.txt.
+Try printf '%s\n' A A B A | uniq -d. It prints A once because the first
+two lines match. The last A stands alone. Keep the scan file in its
+original order so neighboring still means what it did at the scanner.
 
 Suggested commands
   uniq  cat
@@ -1592,7 +1645,9 @@ and use the format string to add the zero padding.
 
 For example, printf '%s\n' alpha beta prints each word on its own
 line because printf reuses the format for the extra argument.
-Submit the flag in dispatch.txt when both files are ready.
+Try printf 'BAY-%03d\n' 4 12. It prints BAY-004 and BAY-012 on separate
+lines. %03d prints a decimal number at least three digits wide, filling
+unused places on the left with zeros.
 
 Suggested commands
   printf  cat  help
@@ -1629,8 +1684,7 @@ directly, grant yourself execute permission and use its relative path.
   chmod u+x label.sh
   ./label.sh EAST BOX-042
 
-The checker runs label.sh directly with different arguments. Submit
-the flag in dispatch.txt once both ways of running it work.
+The checker runs label.sh directly with different arguments.
 
 Suggested commands
   bash  chmod  printf  vim  nvim
@@ -1685,7 +1739,6 @@ Test your own decision.sh with inputs from the dispatch rules.
   bash decision.sh READY 10
 
 That test should print LOAD.
-When the script works, submit the flag in dispatch.txt.
 
 Suggested commands
   bash  printf  help  vim  nvim
@@ -1716,7 +1769,7 @@ Try bash queue.sh east "west gate". It should print the two lines below.
   Queued: west gate
 
 In Bash, for item in "$@"; do ... done visits each argument
-in turn. Run your script, then submit the flag in dispatch.txt.
+in turn. Run your script and compare its output.
 
 Suggested commands
   bash  printf  help  vim  nvim
@@ -1786,8 +1839,6 @@ Run the script and inspect the report.
   cat ready-ids.txt
 
 The checker pipes in different rows and reads the file your script writes.
-
-Submit the flag in dispatch.txt once your script handles the input.
 
 Suggested commands
   bash  read  cat  printf  vim  nvim
@@ -1864,9 +1915,6 @@ it accepts HOLD or WAIT. In awk, || means either condition can pass.
 Run your exercise program with this command.
 
   awk -F '|' -f states.awk updates.txt
-
-Submit the flag in dispatch.txt when your program works on the
-sample and on different inputs.
 
 Suggested commands
   awk  vim  nvim

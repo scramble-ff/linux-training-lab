@@ -67,8 +67,7 @@ class LabTests(unittest.TestCase):
                 script = folder / name
                 script.write_text("#!/bin/bash\n" + body + "\n")
                 script.chmod(0o700)
-                result = self.runner("submit", (folder / "dispatch.txt").read_text().strip(),
-                                     success=False)
+                result = self.runner("submit", success=False)
                 for text in (name, expected, "Expected ", "Actual "):
                     self.assertIn(text, result)
                 self.assertIn("Incorrect submissions: 0", self.runner("stats"))
@@ -120,6 +119,7 @@ class LabTests(unittest.TestCase):
         for number in range(33, 41):
             with self.subTest(number=number):
                 folder = self.lesson(number)
+                self.assertFalse((folder / "dispatch.txt").exists())
                 before = self.runner("check", success=False)
                 self.assertIn("[ ]", before)
                 if number == 33:
@@ -183,11 +183,15 @@ class LabTests(unittest.TestCase):
         del self.env["LINUX_LAB_PRACTICE_ID"]
         self.assertIn("1 independent, 0 with walkthrough", self.runner("stats"))
         self.assertIn("Challenge 02", self.runner("current"))
+        self.runner("hint")
         self.runner("save")
-        self.assertTrue(legacy.read_text().startswith("BEGINNIX-CHECKPOINT-2\n"))
+        self.assertTrue(legacy.read_text().startswith("BEGINNIX-CHECKPOINT-3\n"))
         self.runner("teardown")
         self.runner("setup", "--resume", str(legacy))
-        self.assertIn("1 independent", self.runner("stats"))
+        stats = self.runner("stats")
+        self.assertIn("1 independent", stats)
+        self.assertIn("Hints used\n02  Find the hidden note", stats)
+        self.assertIn("Answers revealed\n01  Find your bearings", stats)
 
     def test_upgrading_an_unfinished_archive_lesson(self):
         self.runner("setup", "--jump", "35")
@@ -211,17 +215,29 @@ class LabTests(unittest.TestCase):
     def test_guided_revisions(self):
         self.runner("setup", "--jump", "3")
         self.assertIn("dispatch.log", self.runner("current"))
-        self.assertIn("Discovery", self.runner("check"))
+        self.assertIn("option letters", self.runner("check"))
         count = sum(line.startswith("WARN") for line in (self.lesson(3) / "dispatch.log").read_text().splitlines())
-        self.runner("submit", f"FLAG{{r-c-{count}}}")
+        self.runner("submit", "r", "c", str(count))
         self.runner("teardown")
         self.runner("setup", "--jump", "25")
         folder = self.lesson(25)
         port = next(row.split()[3].split(":")[1] for row in (folder / "sockets.txt").read_text().splitlines()
                     if row.startswith("LISTEN") and row.split()[3].startswith("127.0.0.1"))
-        (folder / "listener.txt").write_text(port)
-        self.assertIn("checks passed", self.runner("check"))
-        self.runner("submit", (folder / "dispatch.txt").read_text().strip())
+        self.assertIn("Numeric local port", self.runner("check"))
+        self.assertIn("Incorrect answer", self.runner("submit", "1", success=False))
+        self.runner("submit", port)
+
+    def test_submission_by_finding_and_work(self):
+        self.runner("setup", "--jump", "27")
+        folder = self.lesson(27)
+        parcels = sorted({line.split("|")[3] for line in (folder / "scans.txt").read_text().splitlines()
+                          if line.split("|")[1:3] == ["NORTH", "READY"]})
+        self.runner("submit", stdin=f"{parcels[0]} {len(parcels)}\n")
+        folder = self.lesson(28)
+        self.assertFalse((folder / "dispatch.txt").exists())
+        self.assertIn("with no arguments", (folder / "README.txt").read_text())
+        self.runner("submit", success=False)
+        self.assertIn("Challenge 28", self.runner("current"))
 
     def test_neon_arcade_stats(self):
         self.runner("setup")
@@ -247,7 +263,7 @@ class LabTests(unittest.TestCase):
             return result.stdout
 
         arcade = terminal_stats()
-        for item in ("✦ BEGINNIX ARCADE ✦", "85%", "34 / 40", "Report dock and pallet count",
+        for item in ("✦ Player Stats ✦", "85%", "34 / 40", "Report dock and pallet count",
                      "7 / 19", "NEXT OBJECTIVE", "bn stats --details", "┏━┓", "Independent guided clears"):
             self.assertIn(item, arcade)
         for color in (81, 213, 221):
@@ -270,6 +286,9 @@ class LabTests(unittest.TestCase):
 
     def test_course_options_and_plain_menu(self):
         self.runner("setup", "--puzzles")
+        contents = self.runner("setup", stdin="3\n8\n8\n")
+        self.assertIn("(01–07) Navigation and file basics", contents)
+        self.assertIn("(33–40) Dispatch puzzles", contents)
         menu = self.runner("setup", stdin="5\n1\n\n8\n")
         self.assertIn("  5  Course options", menu)
         self.assertIn("Puzzle objectives demonstrated:", menu)
@@ -284,7 +303,7 @@ class LabTests(unittest.TestCase):
         self.assertFalse((self.root / "previous-attempts").exists())
 
     def test_menu_arrows_update_in_place(self):
-        command = f"stty rows 11 cols 80; exec bash {shlex.quote(str(SCRIPT))}"
+        command = f"stty rows 11 cols 80; bash {shlex.quote(str(SCRIPT))}; exit $?"
         for no_color in ("", "1"):
             with self.subTest(no_color=no_color):
                 result = subprocess.run(
@@ -304,12 +323,30 @@ class LabTests(unittest.TestCase):
                 self.assertEqual(updates.count("How to play"), 1)
                 self.assertEqual("\x1b[7;1m" in updates, not no_color)
 
+    def test_teardown_from_sourced_and_direct_launcher(self):
+        runner = shlex.quote(str(SCRIPT))
+        for mode, launch in (("source", f"source {runner} setup --training"),
+                             ("direct", f"exec bash {runner} setup --training")):
+            with self.subTest(mode=mode):
+                commands = [launch, "bn teardown",
+                            r'''[[ $PWD == "$HOME" && $(umask) == 0022 && -z ${BEGINNIX_TERMINAL_DIR:-} ]] && printf 'returned-%s\n' home''',
+                            "exit"]
+                result = subprocess.run(
+                    ["script", "-qec", "umask 022; exec bash --noprofile --norc -i", "/dev/null"],
+                    input="\n".join(commands) + "\n", text=True, capture_output=True,
+                    cwd=self.home, env=dict(self.env, SHELL="/bin/bash", HISTFILE="/dev/null"),
+                    timeout=8, check=True)
+                self.assertIn("Lab removed.", result.stdout)
+                self.assertIn("returned-home", result.stdout)
+                self.assertFalse(self.root.exists())
+
     def exercise_navigation(self, shell):
         self.env["LAB_SHELL"] = shell
         self.env["TERM"] = "xterm-256color"
         self.env.pop("NO_COLOR", None)
         # util-linux script supplies the same controlling TTY as a real launch.
-        with subprocess.Popen(["script", "-qec", f"bash {shlex.quote(str(SCRIPT))} setup --training",
+        self.env["HISTFILE"] = "/dev/null"
+        with subprocess.Popen(["script", "-qec", "exec bash --noprofile --norc -i",
                                "/dev/null"], cwd=self.home, env=self.env,
                               stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT) as proc:
             pending = b""
@@ -332,11 +369,14 @@ class LabTests(unittest.TestCase):
                 proc.stdin.flush()
 
             try:
-                expect("exit for the menu.")
+                send("host_pid=$$; host_dir=$PWD")
+                send(f"bash {shlex.quote(str(SCRIPT))} setup --training")
+                expect("menu to return to the main menu.")
+                expect("[BEGINNIX LAB]")
                 send("touch scratch-note && bn restart --confirm")
                 expect("Previous attempt:")
                 expect("Challenge 01")
-                send('test ! -e scratch-note && submit "$(cat supplies/note.txt)"')
+                send('test ! -e scratch-note && cat supplies/note.txt | submit')
                 expect("Choice [1]")
                 send("1")
                 expect("Challenge 02")
@@ -350,32 +390,37 @@ class LabTests(unittest.TestCase):
                 expect("Choice [1]")
                 send("3")
                 expect("Challenge 04")
-                send('mkdir staging && touch staging/arrival.txt && beginnix submit "$(cat dispatch.txt)"')
+                send('mkdir staging && touch staging/arrival.txt && submit')
                 expect("Challenge 05")
                 send('printf "arrived-in-%s\\n" "${PWD##*/}"')
                 expect("arrived-in-05")
-                send("exit")
+                send("menu")
                 expect("\x1b[7;1m > Continue course")
                 send("")  # Reopen the course in a fresh shell.
-                expect("exit for the menu.")
+                expect("menu to return to the main menu.")
                 send("cp manifest.txt backup.txt && mv draft.txt ready.txt")
                 send("sh")
-                send('bn submit "$(cat dispatch.txt)"')
+                send('bn submit')
                 expect("Progress saved.")
                 send("exit")  # The parent lesson shell picks up the child submission.
                 expect("Challenge 06")
                 send('printf "reopened-in-%s\\n" "${PWD##*/}"')
                 expect("reopened-in-06")
+                self.assertTrue((self.root / ".auto-move").exists())
+                send("bn move ask")
+                expect("After submission: ask")
+                self.assertFalse((self.root / ".auto-move").exists())
+                send("bn teardown")
+                expect("Lab removed.")
+                send('[[ $$ == "$host_pid" && $PWD == "$host_dir" ]] && printf "original-%s\\n" shell')
+                expect("original-shell")
                 send("exit")
-                expect("Continue course")
+                self.assertEqual(proc.wait(timeout=5), 0)
+                self.assertFalse(self.root.exists())
             finally:
                 proc.terminate()
                 proc.wait(timeout=10)
-        self.assertTrue((self.root / ".auto-move").exists())
-        self.runner("move", "ask")
-        self.assertFalse((self.root / ".auto-move").exists())
         self.assertFalse((self.home / ".bash_history").exists())
-        self.assertFalse(list(self.root.glob(".terminal.*")))
 
     def test_bash_navigation(self):
         self.exercise_navigation("bash")

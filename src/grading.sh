@@ -175,16 +175,12 @@ arcade_progress() {
         printf '%s\n%s%d%%%s  Solved: %d / %d\n' "$heading" "$sky" "$percent" "$reset" "$solved" "$limit"
     fi
 
-    local tint symbol
-    for ((i=0; i<20; i++)); do
-        symbol=$empty tint=''
-        if (( i < filled )); then
-            symbol=$block
-            if (( i < 6 )); then tint=$sky
-            elif (( i < 14 )); then tint=$pink
-            else tint=$gold; fi
-        fi
-        printf '%s%s%s' "$tint" "$symbol" "$reset"
+    local tint
+    for ((i=0; i<filled; i++)); do
+        if (( i < 6 )); then tint=$sky
+        elif (( i < 14 )); then tint=$pink
+        else tint=$gold; fi
+        printf '%s%s%s' "$tint" "$block" "$reset"
     done
     printf '\n\n'
 }
@@ -193,10 +189,10 @@ show_stats() {
     local details=$1 position id index key marks status solved limit elapsed heading run=Course
     local independent=0 assisted=0 available=0 verified=0 possible=0 puzzles=0
     local next_label='' next_action='' checklist='' pink='' sky='' gold='' reset=''
-    local star='*' arrow='>' block='#' empty='-' locale_name=${LC_ALL:-${LC_CTYPE:-${LANG:-C}}}
+    local star='*' arrow='>' block='#' locale_name=${LC_ALL:-${LC_CTYPE:-${LANG:-C}}}
     if [[ -t 1 && ${TERM:-dumb} != dumb ]]; then
         case "${locale_name^^}" in
-            *UTF-8*|*UTF8*) star='✦' arrow='▸' block='▰' empty='▱' ;;
+            *UTF-8*|*UTF8*) star='✦' arrow='▸' block='▰' ;;
         esac
         if [[ -z ${NO_COLOR:-} ]]; then
             pink=$'\033[1;95m' sky=$'\033[1;96m' gold=$'\033[1;93m' reset=$'\033[0m'
@@ -205,6 +201,7 @@ show_stats() {
             fi
         fi
     fi
+    local hints='' answers='' entry
     solved=$(solved_count)
     limit=$((total-first_challenge+1))
     elapsed=$(elapsed_seconds)
@@ -213,11 +210,14 @@ show_stats() {
     elif (( first_challenge > 1 )); then run='Lesson run'; fi
     heading="$run progress"
     if (( current > total )); then heading="$run cleared!"; fi
-    printf '\n%s%s BEGINNIX ARCADE %s%s\n\n' "$pink" "$star" "$star" "$reset"
+    printf '\n%s%s Player Stats %s%s\n\n' "$pink" "$star" "$star" "$reset"
     arcade_progress "$solved" "$limit"
 
     for ((position=first_challenge; position<=total; position++)); do
         id=${course_order[position-1]}
+        printf -v entry '%02d  %s\n' "$position" "${lesson_titles[id]}"
+        if [[ -f "$state_dir/.hint-$id" ]]; then hints+="$entry"; fi
+        if [[ -f "$state_dir/.answer-$id" ]]; then answers+="$entry"; fi
         puzzle_objectives "$id"
         if (( ${#objectives[@]} == 0 )); then
             available=$((available+1))
@@ -278,6 +278,8 @@ show_stats() {
         arrow=$star
     fi
     printf '%s%s%s\n%s%s %s%s\n\n' "$pink" "$next_label" "$reset" "$gold" "$arrow" "$next_action" "$reset"
+    printf '%sHints used%s\n%s\n' "$sky" "$reset" "${hints:-None recorded.}"
+    printf '%sAnswers revealed%s\n%s\n' "$gold" "$reset" "${answers:-None recorded.}"
     printf 'Elapsed: %dh %02dm %02ds\nIncorrect submissions: %d (free retries)\n' \
         "$((elapsed/3600))" "$((elapsed/60%60))" "$((elapsed%60))" "$mistakes"
     if (( score )); then printf 'Previous scoring system: %d historical points\n' "$score"; fi

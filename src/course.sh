@@ -1,7 +1,7 @@
 previous_course_order=(1 2 6 19 20 21 22 23 24 25 26 3 4 18 7 8 9 10 12 11 13 14 15 16 17 5 27 28 29 30)
 course_order=(1 2 6 19 20 21 22 23 24 31 25 26 3 4 18 7 8 9 10 12 11 13 14 15 16 17 5 32 33 34 35 36 27 29 30 28 37 38 39 40)
 total=${#course_order[@]}
-version=38
+version=44
 puzzle_start_id=27
 lesson_titles=(
     [1]='Find your bearings'
@@ -155,6 +155,14 @@ refresh_search_fixtures() {
 }
 
 refresh_lesson_prompts() {
+    local lesson lesson_dir
+    if [[ ! -e "$state_dir/.submission-prompts-v44" ]]; then
+        for lesson in "${course_order[@]}"; do
+            lesson_dir=$(folder "$lesson")
+            if [[ -f "$lesson_dir/README.txt" ]]; then write_intro "$lesson" "$lesson_dir"; fi
+        done
+        touch -- "$state_dir/.submission-prompts-v44"
+    fi
     local marker="$state_dir/.lesson-prompts-v31" challenge destination
     [[ -e "$marker" ]] && return 0
     for challenge in 2 6 16 27 28 29 30 32 33 35 36 37 38; do
