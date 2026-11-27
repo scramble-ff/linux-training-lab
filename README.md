@@ -1,4 +1,4 @@
-# Beginnix
+# Linux Command Line Training 
 
 Learn the Linux command line on the night shift at Neon Harbor Dispatch. Guided lessons teach the tools, and dispatch puzzles let you put them to work.
 
