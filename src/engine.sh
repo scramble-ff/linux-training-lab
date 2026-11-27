@@ -24,10 +24,10 @@ menu_guide() {
     cat <<'GUIDE'
 How to play
 
-Use the Up and Down arrows to move > to an option. Press Enter to open it.
-In a submenu, select Back to return, or Cancel to leave a confirmation.
+Use the Up and Down arrows to move the fish (><>) to an option. Press Enter to open it.
+In submenus, Esc returns to the previous screen or cancels a confirmation.
 
-First visit     Choose Setup, then Guided training to start lesson 1.
+First visit     Choose Start guided training to open lesson 1.
 Return visit    Choose Continue course to open your current lesson.
 In a lesson     Read the README, then type Linux commands at
                 the shell prompt. Type bn current to reread the task.
@@ -38,7 +38,8 @@ Found a value?  Type submit and enter the requested finding at the prompt.
                 Every lesson ends with a How to submit section.
 Puzzles         Use bn check for objective feedback and bn submit to finish.
 Fresh attempt   Use bn restart to preview a reset of the active lesson.
-Next lesson     After a correct submission, choose Move, Stay, or Always move.
+Next lesson     After a correct submission, choose Move to next challenge,
+                Stay and review this challenge, or Always move to next challenge.
                 If you stay, bn current shows how to reach the next lesson.
 Take a break    Type menu at the lesson prompt to return to the main menu.
                 Choose Exit to keep working on this machine later, or
@@ -47,8 +48,9 @@ Take a break    Type menu at the lesson prompt to return to the main menu.
 Table of contents groups lessons by topic.
 With an installed course, picking the current lesson resumes it. Picking
 another opens separate practice. A [~] marks a walkthrough completion;
-[x] includes independent replays. Course options includes progress,
-restart, navigation preferences and teardown.
+[x] includes independent replays. Course options includes restart,
+navigation preferences and teardown. Open Player Stats to review
+lessons where you used a hint or a walkthrough.
 GUIDE
 }
 
@@ -85,7 +87,7 @@ Saving and restoring
   in your installed course. To export practice, use bn save in that shell.
   bn save defaults to ~/beginnix-progress.txt. Save outside the lab so
   the checkpoint survives teardown. Teardown also removes archived labs,
-  practice sessions, lesson-shell history, and the Always move preference.
+  practice sessions, lesson-shell history, and your navigation preference.
 
 Command-line shortcuts
   bash lab.sh setup             Open the course menu.
@@ -129,6 +131,11 @@ load_state() {
         adjust_start_position
         if (( current == 0 )); then current=$(next_challenge); fi
     fi
+    # Older 40-lesson runs used 41 to mean complete. The new lesson
+    # cannot be active in a run starting beyond its playable position.
+    if (( current == 41 )) && (( first_challenge > $(challenge_position 41) )); then
+        current=$(next_challenge)
+    fi
 }
 
 is_solved() {
@@ -159,25 +166,43 @@ init_state() {
     score=0 mistakes=0 attempts=0 finished=, earned=, reassessed=,
     prepare "$current"
     save_state
-    touch -- "$state_dir/.expanded-search-fixtures" "$state_dir/.lesson-prompts-v31"
+    touch -- "$state_dir/.expanded-search-fixtures" "$state_dir/.lesson-prompts-v31" "$state_dir/.hidden-note-v45" "$state_dir/.lesson-prompts-v52"
 }
 
 lesson_heading() {
     local color='' reset=''
     if [[ -t 1 && ${TERM:-dumb} != dumb && -z ${NO_COLOR:-} ]]; then
-        color=$'\033[1;96m' reset=$'\033[0m'
+        case "${2:-task}" in
+            submit) color=$'\033[1;95m' ;;
+            success) color=$'\033[1;92m' ;;
+            milestone) color=$'\033[1;93m' ;;
+            example|task) color=$'\033[1;92m' ;;
+            *) color=$'\033[1;96m' ;;
+        esac
+        reset=$'\033[0m'
     fi
-    printf '\n%s── %s ──%s\n' "$color" "$1" "$reset"
+    printf '\n%s━━[ %s ]━━%s\n' "$color" "$1" "$reset"
 }
 
 display_lesson() {
-    local line title
+    local line title position section white='' reset=''
+    position=$(challenge_position "$current")
+    section=$(section_index "$position")
+    if [[ -t 1 && ${TERM:-dumb} != dumb && -z ${NO_COLOR:-} ]]; then
+        white=$'\033[1;97m' reset=$'\033[0m'
+    fi
     {
         IFS= read -r title || return 1
-        lesson_heading "$(printf 'Challenge %02d of %d · %s' "$(challenge_position "$current")" "$total" "$title")"
+        printf '\n Neon Harbor Dispatch / %s\n' "${sections[section]}"
+        lesson_heading "$(printf 'Challenge %02d of %d · %s' "$position" "$total" "$title")"
         while IFS= read -r line; do
-            if [[ "$line" == 'Suggested commands' || "$line" == 'How to submit' ]]; then lesson_heading "$line"
-            else printf '%s\n' "$line"; fi
+            case "$line" in
+                'Your task'|'Suggested commands'|'Shell tip') lesson_heading "$line" ;;
+                'Try this') lesson_heading "$line" example ;;
+                'How to submit') lesson_heading "$line" submit ;;
+                '  '*) printf '%s%s%s\n' "$white" "$line" "$reset" ;;
+                *) printf '%s\n' "$line" ;;
+            esac
         done
     } < "$1/README.txt"
 }
@@ -203,7 +228,7 @@ show_current() {
 }
 
 require_install() {
-    installed || fail 'Lab installation not found. Run bash lab.sh, then choose Setup.'
+    installed || fail 'Lab installation not found. Run bash lab.sh and choose Start guided training.'
 }
 
 lock_installed() {
@@ -222,13 +247,30 @@ install_runner() {
     ln -sfnT -- beginnix "$root/bin/lab"
     ln -sfnT -- beginnix "$root/bin/bn"
     cat > "$root/commands.sh" <<'COMMANDS'
+# Read the active lesson from this run, even when reviewing an older folder.
+_bn_update_prompt() {
+    local state_file="${BEGINNIX_TERMINAL_DIR%/*}/state" seed started active remaining id position=0 label='Run complete'
+    IFS=' ' read -r seed started active remaining < "$state_file" || return
+    [[ $active != "${_bn_prompt_id:-}" ]] || return 0
+    for id in "${_bn_course_ids[@]}"; do
+        position=$((position + 1))
+        if [[ $id == "$active" ]]; then
+            printf -v label 'Challenge %02d' "$position"
+            break
+        fi
+    done
+    PS1=${_bn_prompt_template/CHALLENGE_LABEL/$label}
+    _bn_prompt_id=$active
+}
+
 # This hook also handles a submission from a child sh when the learner
 # returns to the lesson shell. Each open terminal has its own notification.
 _bn_after_submit() {
     local previous_status=$? destination choice
     [[ ${BEGINNIX_LESSON_PID:-} == "$$" && -n ${BEGINNIX_TERMINAL_DIR:-} ]] || return "$previous_status"
     if [[ ! -d "$BEGINNIX_TERMINAL_DIR" ]]; then unset HISTFILE; exit 0; fi
-    if [[ -f "$BEGINNIX_TERMINAL_DIR/menu" ]]; then exit 0; fi
+    if [[ -f "$BEGINNIX_TERMINAL_DIR/menu" || -f "$BEGINNIX_TERMINAL_DIR/review" ]]; then exit 0; fi
+    _bn_update_prompt
     if [[ -f "$BEGINNIX_TERMINAL_DIR/restart" ]]; then
         destination=$(< "$BEGINNIX_TERMINAL_DIR/restart")
         rm -f -- "$BEGINNIX_TERMINAL_DIR/restart" "$BEGINNIX_TERMINAL_DIR/next"
@@ -239,15 +281,13 @@ _bn_after_submit() {
     destination=$(< "$BEGINNIX_TERMINAL_DIR/next")
     rm -f -- "$BEGINNIX_TERMINAL_DIR/next" || return 1
     if [[ ! -f "$HOME/.linux-training-lab/.auto-move" ]]; then
-        while :; do
-            printf '\nNext lesson: 1) Move now  2) Stay here  3) Always move\nChoice [1]: '
-            IFS= read -r choice || return 0
-            case "$choice" in
-                1|'') break ;;
-                2) printf 'Staying here. Use bn current for the next lesson.\n'; return 0 ;;
-                3) touch -- "$HOME/.linux-training-lab/.auto-move" || return 1; break ;;
-            esac
-        done
+        choice=$(command beginnix --choose-next) || return 0
+        case "$choice" in
+            2) printf 'Staying here. Use bn current for the next lesson.\n'; return 0 ;;
+            3) touch -- "$HOME/.linux-training-lab/.auto-move" || return 1 ;;
+            1) ;;
+            *) return 0 ;;
+        esac
     fi
     cd -- "$destination" && command beginnix current
 }
@@ -262,13 +302,14 @@ submit() {
     command beginnix submit "$@"
 }
 COMMANDS
+    printf '_bn_course_ids=(%s)\n' "${course_order[*]}" >> "$root/commands.sh"
     cat > "$root/.zshrc" <<'ZSHRC'
 source "$ZDOTDIR/commands.sh"
 precmd_functions+=(_bn_after_submit)
-PROMPT='[BEGINNIX LAB] %~
+_bn_prompt_template='[BEGINNIX LAB] [CHALLENGE_LABEL] %~
 %# '
 if [[ -t 2 && ${TERM:-dumb} != dumb && -z ${NO_COLOR:-} ]]; then
-    PROMPT='%K{magenta}%F{white}%B[BEGINNIX LAB]%b%f%k %B%F{cyan}%~%f%b
+    _bn_prompt_template='%K{magenta}%F{white}%B[BEGINNIX LAB] [CHALLENGE_LABEL]%b%f%k %B%F{cyan}%~%f%b
 %# '
 fi
 unset ZDOTDIR
@@ -277,9 +318,9 @@ ZSHRC
 source "$HOME/.linux-training-lab/commands.sh"
 PROMPT_COMMAND+=(_bn_after_submit)
 set -o emacs
-PS1='[BEGINNIX LAB] \w\n\$ '
+_bn_prompt_template='[BEGINNIX LAB] [CHALLENGE_LABEL] \w\n\$ '
 if [[ -t 2 && ${TERM:-dumb} != dumb && -z ${NO_COLOR:-} ]]; then
-    PS1='\[\e[1;97;45m\][BEGINNIX LAB]\[\e[0m\] \[\e[1;96m\]\w\[\e[0m\]\n\$ '
+    _bn_prompt_template='\[\e[1;97;45m\][BEGINNIX LAB] [CHALLENGE_LABEL]\[\e[0m\] \[\e[1;96m\]\w\[\e[0m\]\n\$ '
     alias ls='ls --color=auto'
 fi
 BASHRC
@@ -383,7 +424,9 @@ read_checkpoint() {
     IFS=, read -r -a entries <<< "${reassessed#,}"
     seen=,
     for id in "${entries[@]}"; do
-        is_solved "$id" && [[ "$checkpoint_revealed" == *",$id,"* && "$seen" != *",$id,"* ]] || fail "$invalid"
+        [[ "$id" == "$current" ]] || is_solved "$id" || fail "$invalid"
+        [[ "$seen" != *",$id,"* ]] &&
+            [[ "$checkpoint_revealed" == *",$id,"* || "$checkpoint_hinted" == *",$id,"* ]] || fail "$invalid"
         seen+="$id,"
     done
     adjust_start_position
@@ -403,7 +446,7 @@ restore_checkpoint() {
     IFS=, read -r -a revealed <<< "${checkpoint_hinted#,}"
     for challenge in "${revealed[@]}"; do touch -- "$state_dir/.hint-$challenge"; done
     save_state
-    touch -- "$state_dir/.expanded-search-fixtures" "$state_dir/.lesson-prompts-v31"
+    touch -- "$state_dir/.expanded-search-fixtures" "$state_dir/.lesson-prompts-v31" "$state_dir/.hidden-note-v45" "$state_dir/.lesson-prompts-v52"
 }
 
 valid_start_position() {
@@ -474,12 +517,18 @@ choose_row() {
     local key suffix size rows cols i start limit n filled empty width banner_rows
     local highlight='' reset='' label_width label row footer=' Up/Down to move   Enter to select'
     local interactive=0 cursor_menu=0 previous_size='' previous_pick=-1 previous_start=-1
-    local full_draw visible
+    local full_draw visible offset detail_line option_text padding
+    local style=${menu_style:-page} detail=${menu_detail:-} back=-1
+    for i in "${!options[@]}"; do
+        case "${options[i]}" in Back|Cancel|'Stay and review this challenge') back=$i ;; esac
+    done
+    if (( back >= 0 )); then footer+='   Esc Back'; fi
+    if [[ "$style" == next ]]; then footer=' Choice [1]   ↑/↓ or 1–3   Enter to select'; fi
     if [[ -t 0 && -t 1 ]]; then
         interactive=1
         if [[ ${TERM:-dumb} != dumb ]]; then
             cursor_menu=1
-            if [[ -z ${NO_COLOR:-} ]]; then highlight=$'\033[7;1m' reset=$'\033[0m'; fi
+            if [[ -z ${NO_COLOR:-} ]]; then highlight=$'\033[1;97;45m' reset=$'\033[0m'; fi
         fi
     fi
     pick=0
@@ -493,50 +542,74 @@ choose_row() {
         if (( ! cursor_menu )) || [[ "$rows $cols" != "$previous_size" ]]; then
             full_draw=1
             previous_size="$rows $cols"
-            if (( cursor_menu )); then
-                if (( ! screen )); then printf '\033[?1049h\033[?25l'; screen=1; fi
-                printf '\033[H\033[2J'
+            if [[ "$style" == inline || "$style" == next ]]; then
+                printf '\n %.*s\n' "$cols" "$heading"
+                limit=$((rows - 5))
+            else
+                if (( cursor_menu )); then
+                    if (( ! screen )); then printf '\033[?1049h\033[?25l'; screen=1; fi
+                    printf '\033[H\033[2J'
+                fi
+                if [[ "$style" == home ]]; then
+                    if [[ -n "$highlight" ]]; then printf '\033[1;96m'; fi
+                    show_banner
+                    printf '%s' "$reset"
+                else printf ' BEGINNIX / Neon Harbor Dispatch\n'; banner_rows=1; fi
+                width=$total
+                if (( cols < 65 )); then width=12; fi
+                printf -v filled '%*s' "$((completed * width / run_total))" ''
+                printf -v empty '%*s' "$((width - ${#filled}))" ''
+                printf ' [%s%s] %d/%d %s completed\n\n %s\n' "${filled// /#}" "${empty// /-}" "$completed" "$run_total" "$run_label" "$heading"
+                limit=$((rows - banner_rows - 6))
+                if [[ -n "$detail" ]]; then limit=$((limit-1)); fi
             fi
-            show_banner
-            width=$total
-            if (( cols < 65 )); then width=12; fi
-            printf -v filled '%*s' "$((completed * width / run_total))" ''
-            printf -v empty '%*s' "$((width - ${#filled}))" ''
-            printf ' [%s%s] %d/%d %s completed\n\n %s\n' "${filled// /#}" "${empty// /-}" "$completed" "$run_total" "$run_label" "$heading"
-            limit=$((rows - banner_rows - 6))
             if (( limit < 1 )); then limit=1; fi
             if (( ! interactive )); then limit=${#options[@]}; fi
         fi
         start=$((pick >= limit ? pick - limit + 1 : 0))
         visible=$((${#options[@]} - start))
         if (( visible > limit )); then visible=$limit; fi
-        label_width=$((cols > 5 ? cols-5 : 1))
+        label_width=$((cols > 7 ? cols-7 : 1))
         for ((i=start; i<start+visible; i++)); do
             if (( ! interactive )); then
                 printf ' %2d  %s\n' "$((i+1))" "${options[i]}"
+                if [[ -n "$detail" ]] && (( i == 0 )); then printf '     %s\n' "$detail"; fi
                 continue
             fi
             if (( ! full_draw && start == previous_start )); then
                 if (( pick == previous_pick || (i != pick && i != previous_pick) )); then continue; fi
             fi
+            option_text=${options[i]}
+            if [[ "$style" == next ]]; then option_text="$((i+1))) $option_text"; fi
+            option_text=${option_text:0:label_width}
             if (( i == pick )); then
-                printf -v label ' > %-*.*s' "$label_width" "$label_width" "${options[i]}"
+                printf -v padding '%*s' "$((label_width-${#option_text}))" ''
+                label=" ><> $option_text$padding"
                 row="$highlight${label:0:cols}$reset"
             else
-                printf -v label '   %.*s' "$label_width" "${options[i]}"
+                label="     $option_text"
                 row=${label:0:cols}
             fi
             if (( full_draw )); then
                 printf '%s\n' "$row"
             else
                 # The saved cursor is on the footer, one blank line below the list.
-                printf '\033[%dA\r%s\033[K\0338' "$((visible - (i-start) + 1))" "$row"
+                offset=$((visible - (i-start) + 1))
+                if [[ -n "$detail" ]] && (( i == start )); then offset=$((offset+1)); fi
+                printf '\033[%dA\r%s\033[K\0338' "$offset" "$row"
+            fi
+            if [[ -n "$detail" ]] && (( i == start )); then
+                detail_line=''
+                if (( start == 0 )); then printf -v detail_line '     %.*s' "$label_width" "$detail"; fi
+                if (( full_draw )); then printf '%s\n' "$detail_line"
+                elif (( previous_start != start )); then printf '\033[%dA\r%s\033[K\0338' "$((offset-1))" "$detail_line"; fi
             fi
         done
         previous_pick=$pick previous_start=$start
         if (( ! interactive )); then
             printf ' Choice (1-%d): ' "${#options[@]}"
             IFS= read -r n || exit 0
+            if [[ "$style" == next && -z "$n" ]]; then return 0; fi
             if [[ "$n" =~ ^[1-9][0-9]?$ ]] && (( n <= ${#options[@]} )); then pick=$((n-1)); return; fi
             continue
         fi
@@ -547,9 +620,13 @@ choose_row() {
         IFS= read -rsn1 key || exit 0
         case "$key" in
             '') return 0 ;;
+            [1-3]) if [[ "$style" == next ]]; then pick=$((key-1)); fi ;;
             $'\004') exit 0 ;;
             $'\033')
-                IFS= read -rsn1 -t 0.3 suffix || continue
+                if ! IFS= read -rsn1 -t 0.2 suffix; then
+                    if (( back >= 0 )); then pick=$back; return 0; fi
+                    continue
+                fi
                 [[ "$suffix" == '[' || "$suffix" == O ]] || continue
                 IFS= read -rsn1 -t 0.3 suffix || continue
                 case "$suffix" in
@@ -572,11 +649,34 @@ notify_lesson_terminal() {
     mv -fT -- "$temporary" "$BEGINNIX_TERMINAL_DIR/$1"
 }
 
+start_review_practice() {
+    local position=$1 origin=$state_dir
+    lock_installed || return 1
+    create_practice "$position" || return 1
+    if [[ "$origin" != "$root" ]]; then
+        printf '%s\n' "${origin##*.}" > "$state_dir/.review-source"
+    fi
+    remember_practice
+    exec 9<&-
+}
+
 start_shell() (
+    local position BEGINNIX_TERMINAL_DIR=''
+    export PATH="$root/bin:$PATH" HISTFILE="$root/.lesson-history-$selected_shell"
+    while :; do
+        run_lesson_shell || :
+        [[ -n ${BEGINNIX_TERMINAL_DIR:-} && -f "$BEGINNIX_TERMINAL_DIR/review" ]] || break
+        read -r position < "$BEGINNIX_TERMINAL_DIR/review"
+        valid_start_position "$position" || return 1
+        rm -rf -- "$BEGINNIX_TERMINAL_DIR"
+        start_review_practice "$position" || return 1
+    done
+)
+
+run_lesson_shell() {
     if (( current <= total )); then
         cd -- "$(folder "$current")" || return 1
     fi
-    export PATH="$root/bin:$PATH" HISTFILE="$root/.lesson-history-$selected_shell"
     if [[ -t 0 && -t 1 ]]; then
         printf '\033[2J\033[H'
         if [[ "$state_dir" != "$root" ]]; then printf 'Practice session\n\n'; fi
@@ -596,7 +696,7 @@ start_shell() (
             exec "$shell_path" -d -i
         fi
     )
-)
+}
 
 setup_install() {
     if [[ -n "$checkpoint_file" ]]; then
@@ -683,11 +783,20 @@ teardown_lab() {
 }
 
 choose_lesson() {
-    local section pos id mark end
+    local section pos id mark end count size
     local -a labels section_labels
     for section in "${!sections[@]}"; do
-        printf -v 'section_labels[section]' '(%02d–%02d) %s' "${section_starts[section]}" \
-            "$((section_starts[section+1]-1))" "${sections[section]}"
+        count=0 mark=''
+        end=${section_starts[section+1]}
+        size=$((end-section_starts[section]))
+        for ((pos=section_starts[section]; pos<end; pos++)); do
+            id=${course_order[pos-1]}
+            if is_solved "$id"; then count=$((count+1)); fi
+            if [[ "$id" == "$current" ]]; then mark='  ><> Current'; fi
+        done
+        if (( count == size )); then mark='  ✓ Complete'; fi
+        printf -v 'section_labels[section]' '(%02d–%02d) %s  %d/%d%s' "${section_starts[section]}" \
+            "$((end-1))" "${sections[section]}" "$count" "$size" "$mark"
     done
     number=0
     while :; do
@@ -713,7 +822,7 @@ choose_lesson() {
 lab_menu() {
     local run_total=$total run_label=lessons
     local enter_first=$1 practice_dir='' screen=0 pick number completed=0
-    local choice notice='' mode
+    local choice notice='' mode home_detail
     local -a options
     local -A practices=()
     if [[ "$state_dir" != "$root" ]]; then
@@ -741,7 +850,7 @@ lab_menu() {
         enter_first=0
         state_dir=$root
         unset LINUX_LAB_PRACTICE_ID
-        options=()
+        options=() home_detail=''
         completed=0 finished=, current=0 run_total=$total run_label=lessons
         if installed; then
             lock_installed
@@ -756,23 +865,30 @@ lab_menu() {
             completed=$(solved_count)
             run_total=$((total-first_challenge+1))
             if (( first_challenge >= section_starts[-2] )); then run_label=puzzles; fi
-            if (( current <= total )); then options+=("Continue course — ${lesson_titles[current]}"); fi
+            if (( current <= total )); then
+                options+=('Continue course')
+                printf -v home_detail 'Challenge %02d · %s' "$(challenge_position "$current")" "${lesson_titles[current]}"
+            fi
         else
             practice_dir=''
             practices=()
+            options+=('Start guided training')
         fi
-        options+=('Setup' 'Table of contents')
-        if [[ -n "$practice_dir" ]]; then options+=('Resume last practice'); fi
+        options+=('Table of contents')
+        if installed; then
+            options+=('Player Stats' 'Practice a challenge')
+            if [[ -n "$practice_dir" ]]; then options+=('Resume last practice'); fi
+        else options+=('More starting options'); fi
         if [[ -f "$launch_save" ]]; then options+=('Load saved course'); fi
-        if installed; then options+=('Save and quit' 'Course options'); fi
+        if installed; then options+=('Course options' 'Save and quit'); fi
         options+=('How to play' 'Exit')
-        choose_row "Main menu${notice:+ — $notice}" "${options[@]}"
+        menu_style=home menu_detail="$home_detail" choose_row "Main menu${notice:+ — $notice}" "${options[@]}"
         notice=''
         choice=${options[pick]}
         if [[ "$choice" == 'Course options' ]]; then
-            options=('View progress')
+            options=()
             if (( current <= total )); then options+=('Restart main course lesson'); fi
-            if [[ -f "$root/.auto-move" ]]; then options+=('Navigation — Always move')
+            if [[ -f "$root/.auto-move" ]]; then options+=('Navigation — Always move to next challenge')
             else options+=('Navigation — Ask after submission'); fi
             options+=('Teardown' 'Back')
             choose_row 'Course options' "${options[@]}"
@@ -780,11 +896,17 @@ lab_menu() {
         fi
         case "$choice" in
             Back) continue ;;
-            'View progress')
+            'Player Stats')
                 menu_close
-                "$root/bin/beginnix" stats
-                printf '\nPress Enter to return. '
-                IFS= read -r || break ;;
+                number=0
+                lock_installed
+                load_state
+                exec 9<&-
+                show_stats '' review
+                if (( number )); then
+                    start_review_practice "$number"
+                    enter_first=1
+                fi ;;
             'Restart main course lesson')
                 choose_row "Restart ${lesson_titles[current]}? Keep your files in previous-attempts and retain progress." 'Cancel' 'Keep attempt and restart'
                 if (( pick == 1 )); then
@@ -792,7 +914,7 @@ lab_menu() {
                 fi ;;
             Exit) break ;;
             'Navigation — '*)
-                choose_row 'After a successful submission' 'Ask again' 'Always move' 'Back'
+                choose_row 'After a successful submission' 'Ask again' 'Always move to next challenge' 'Back'
                 if (( pick == 0 )); then bash "${BASH_SOURCE[0]}" move ask
                 elif (( pick == 1 )); then bash "${BASH_SOURCE[0]}" move always; fi ;;
             'How to play')
@@ -831,12 +953,13 @@ lab_menu() {
                 state_dir=$practice_dir
                 export LINUX_LAB_PRACTICE_ID="${state_dir##*.}"
                 enter_first=1 ;;
-            Setup|'Table of contents')
+            'Start guided training'|'More starting options'|'Practice a challenge'|'Table of contents')
                 checkpoint_file=''
-                if [[ "$choice" == Setup ]]; then
+                if [[ "$choice" == 'Start guided training' ]]; then number=1
+                elif [[ "$choice" == 'More starting options' ]]; then
                     options=('Guided training' 'Puzzles' 'Choose a lesson')
-                    mode='Set up course — start with Guided training for lesson 1'
-                    if installed; then mode='Set up practice — main course progress is separate'; else options+=('Restore checkpoint'); fi
+                    mode='Choose a starting point'
+                    options+=('Restore checkpoint')
                     choose_row "$mode" "${options[@]}" 'Back'
                     (( pick < ${#options[@]} )) || continue
                     case "${options[pick]}" in
@@ -882,6 +1005,28 @@ lab_menu() {
     trap - EXIT INT TERM HUP
 }
 
+show_completion() {
+    local id=$1 position section member objective
+    position=$(challenge_position "$id")
+    section=$(section_index "$position")
+    lesson_heading "$(printf '✓ Challenge %02d complete · %s' "$position" "${lesson_titles[id]}")" success
+    if [[ -f "$state_dir/.answer-$id" ]]; then printf 'Completed with walkthrough. '
+    else printf 'Completed independently. '; fi
+    printf 'Progress saved.\n'
+    if (( ${#objectives[@]} )); then
+        for objective in "${objectives[@]}"; do printf '  ✓ %s\n' "$objective"; done
+    else
+        printf '  ✓ %s\n' "${guided_receipts[id]}"
+    fi
+    lesson_heading 'What you practiced'
+    lesson_text "$id" debrief
+    for ((member=section_starts[section]; member<section_starts[section+1]; member++)); do
+        is_solved "${course_order[member-1]}" || return 0
+    done
+    lesson_heading "Section complete · ${sections[section]}" milestone
+    printf 'You can now %s\n' "${section_skills[section],}"
+}
+
 show_hint() {
     if (( current > total )); then
         printf 'All challenges are complete.\n'
@@ -918,6 +1063,12 @@ main() {
             fi
             set -- setup
             action=setup ;;
+        --choose-next)
+            local pick
+            menu_style=next choose_row 'Next challenge' 'Move to next challenge' 'Stay and review this challenge' 'Always move to next challenge' >&2
+            printf '\n' >&2
+            printf '%d\n' "$((pick+1))"
+            return ;;
         --import-launch-save) import_course; return ;;
         help|-h|--help) action=help ;;
         setup|-i|--setup) action=setup ;;
@@ -1008,7 +1159,17 @@ main() {
                     ;;
                 stats)
                     [[ $# == 1 || ( $# == 2 && "$2" == --details ) ]] || fail 'Usage: bn stats [--details]'
-                    show_stats "${2:-}" ;;
+                    if [[ -t 0 ]] && in_lesson_terminal; then
+                        local number=0
+                        exec 9<&-
+                        show_stats "${2:-}" review
+                        if (( number )); then
+                            local request
+                            request=$(mktemp -- "$BEGINNIX_TERMINAL_DIR/.review.XXXXXX")
+                            printf '%d\n' "$number" > "$request"
+                            mv -fT -- "$request" "$BEGINNIX_TERMINAL_DIR/review"
+                        fi
+                    else show_stats "${2:-}"; fi ;;
                 move)
                     [[ $# == 2 ]] || fail 'Usage: bn move ask | always'
                     case "$2" in
@@ -1083,25 +1244,21 @@ main() {
                         save_state
                         fail 'Incorrect answer. Try again or use bn hint. Retries are free.'
                     fi
-                    if (( ${#objectives[@]} )); then grade_puzzle || return 1
+                    if (( ${#objectives[@]} )); then grade_puzzle submit || return 1
                     elif [[ "$current" != 16 || "$answer" == FLAG\{* ]]; then check_practice "$current"; fi
                     solved=$current
                     finished+="$solved,"
                     current=$(next_challenge)
                     attempts=0
                     save_state
-                    lesson_heading "Challenge $(printf '%02d' "$(challenge_position "$solved")") complete"
-                    if [[ -f "$state_dir/.answer-$solved" ]]; then printf 'Completed with walkthrough. '
-                    else printf 'Completed independently. '; fi
-                    printf 'Progress saved.\n'
+                    show_completion "$solved"
                     record_independent_replay "$solved"
-                    lesson_heading "What you practiced"
-                    lesson_text "$solved" debrief
                     prepare_active_lesson_if_missing
                     if (( current > total )); then
                         show_current
                         printf '\nType menu to return to the main menu.\n'
                     elif in_lesson_terminal; then
+                        printf '\nUp next · %02d  %s\n' "$(challenge_position "$current")" "${lesson_titles[current]}"
                         notify_lesson_terminal next
                     else
                         show_current

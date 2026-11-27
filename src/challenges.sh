@@ -41,7 +41,6 @@ submission_instructions() {
 expand_search_fixture() {
     local destination=$2
     case "$1" in
-        2) add_hidden_note_samples "$destination" ;;
         3) add_ticket_search_samples "$destination" ;;
         9) add_bay_search_samples "$destination" ;;
         14) add_storage_samples "$destination" ;;
@@ -68,6 +67,7 @@ prepare() {
         2)
             mkdir -p "$destination/.dispatch"
             printf '%s\n' "$(flag 2)" > "$destination/.dispatch/morning-dispatch-for-the-training-crew.txt"
+            add_dispatch_notes "$destination/.dispatch"
             ;;
         3) write_log_challenge "$destination" ;;
         4) write_archive_challenge "$destination" ;;
@@ -148,6 +148,11 @@ check_practice() {
     local destination
     destination=$(folder "$1")
     case "$1" in
+        41)
+            local report="$destination/relay-label.txt"
+            [[ -f "$report" && ! -L "$report" && ! "$report" -ef /etc/os-release ]] &&
+                cmp -s -- /etc/os-release "$report" ||
+                fail 'Use curl -o to save a separate copy of the full system label in relay-label.txt.' ;;
         7)
             local mode
             mode=$(stat -c %a -- "$destination/delivery-note.txt")
@@ -350,13 +355,18 @@ check_bash_output() {
     check_script_output "$script" "$expected" bash --noprofile --norc "./${script##*/}" "$@"
 }
 
-add_hidden_note_samples() {
-    local destination=$1 sample name
-    mkdir -p "$destination/.dispatch"
-    for (( sample=1; sample<=64; sample++ )); do
-        printf -v name 'handoff-%02d.txt' "$sample"
-        printf 'Routine dispatch handoff %02d\n' "$sample" > "$destination/.dispatch/$name"
-    done
+add_dispatch_notes() {
+    local directory=$1 name note
+    while IFS='|' read -r name note; do
+        if [[ ! -e "$directory/$name" && ! -L "$directory/$name" ]]; then
+            printf '%s\n' "$note" > "$directory/$name"
+        fi
+    done <<'NOTES'
+dock-map.txt|Deliveries use the east entrance.
+inventory.txt|Six crates are ready for pickup.
+shift-roster.txt|The loading crew starts at seven.
+weather-report.txt|Clear skies at the depot.
+NOTES
 }
 
 write_log_challenge() {
@@ -470,7 +480,8 @@ add_bay_search_samples() {
 check_key_practice() {
     local destination=$1 public_key key_type details bits fingerprint
     public_key="$destination/training-key.pub"
-    [[ -s "$destination/training-key" && -s "$public_key" ]] ||
+    [[ -f "$destination/training-key" && ! -L "$destination/training-key" && -s "$destination/training-key" &&
+       -f "$public_key" && ! -L "$public_key" && -s "$public_key" ]] ||
         fail 'Create the training-key pair in this challenge folder first.'
     read -r key_type _ < "$public_key" ||
         fail 'Check that training-key.pub contains your public key.'
@@ -916,10 +927,43 @@ check_access_modes() {
 
 lesson_text() {
     case "$1:$2" in
+        41:intro) cat <<'PROMPT' ;;
+Fetch the relay system label
+
+Your task
+The relay desk needs a copy of this machine's Linux distribution label.
+Use curl to retrieve it and save it as relay-label.txt in the lesson folder.
+
+Try this
+  curl file:///etc/os-release
+
+curl transfers data from a URL. With an https:// URL it can fetch data
+from a web server. Here file:// tells it to read a local file, so this
+exercise works offline. The final slash begins the path /etc/os-release.
+Look for the distribution name in the text curl prints.
+
+Run it again with -o and a filename to save the same data:
+
+  curl -o relay-label.txt file:///etc/os-release
+  cat relay-label.txt
+
+Suggested commands
+  curl  cat
+PROMPT
+        41:hint) printf 'Put the output filename directly after -o. Keep all three slashes in the local URL.\n' ;;
+        41:answer) cat <<'ANSWER' ;;
+  curl -o relay-label.txt file:///etc/os-release
+  cat relay-label.txt
+ANSWER
+        41:debrief) printf 'curl displays the retrieved data on standard output by default. With -o it writes that data to the file you name.\n' ;;
         1:intro) cat <<'PROMPT' ;;
 Find your bearings
 
-The supply crew left you a note. You start in the lesson folder.
+Your task
+Neon Harbor’s rooftop relays keep its night couriers connected. Your
+first shift starts with a supply note. Open it and recover the flag.
+
+Try this
 Type each command at the prompt and press Enter.
 
 1. Type ls to list the files and folders here. Look for supplies.
@@ -944,10 +988,30 @@ ANSWER
         2:intro) cat <<'PROMPT' ;;
 Find the hidden note
 
-The dispatcher tucked the morning handoff note in a hidden
-directory. Find that directory, then start typing the note's name
-in your command and press Tab to finish it. Read the note and
-submit the flag.
+Your task
+The rooftop relay crew left the morning handoff in a hidden directory.
+
+Try this
+Start by typing ls --help. Near the top, look for this line:
+
+  Usage: ls [OPTION]... [FILE]...
+
+ls is the command. Brackets mark optional parts you can leave out.
+The dots mean you can supply more than one. Type the actual options
+and names in your command; the brackets and dots stay on the help page.
+
+Try ls on its own. With no path it lists your current directory.
+Now try ls -l . to see how the pieces fit: -l is an option for a long
+listing, and the dot is the path for your current directory.
+
+Back in ls --help, look for the option that includes entries starting
+with a dot. Use it to find the hidden directory, then enter it with cd.
+Run ls inside. Among the five files, look for the morning handoff.
+Type cat mor and press Tab to complete its name, then Enter to read it.
+
+Shell tip
+Press Up to recall an earlier command and Down to move forward again.
+You can edit the recalled line before pressing Enter.
 
 Suggested commands
   ls  cd  cat
@@ -963,10 +1027,12 @@ ANSWER
         3:intro) cat <<'PROMPT' ;;
 Follow the ticket
 
-The dispatch team left a flag on ticket TICKET-1042. Search the .log
-files under records and submit the flag on that ticket's line. Other
-tickets may have flags of their own.
+Your task
+A relay under the maglev line logged a flag on ticket TICKET-1042.
+Search the .log files under records and submit the flag on that ticket's
+line. Other tickets may have flags of their own.
 
+Try this
 Start with find records -name '*.log'. The quotes let find apply the
 pattern inside each folder. Pick a returned path and run grep -n 'TICKET-'
 followed by that path to see matching lines and their line numbers.
@@ -985,10 +1051,12 @@ ANSWER
         4:intro) cat <<'PROMPT' ;;
 Open the shipment
 
-Three files arrived from dispatch. Open routing.txt.gz to find the
-first handoff. Follow the notes until you can read the receipt and
-submit its flag.
+Your task
+Three files arrived by data ferry while the district mesh was down. Open
+routing.txt.gz to find the first handoff. Follow the notes until you can
+read the receipt and submit its flag.
 
+Try this
 For an archive named example.tar, tar -tf example.tar lists its members
 before you unpack it. Change t to x to extract them. In both commands,
 f means the next argument names the archive.
@@ -1011,11 +1079,13 @@ ANSWER
         5:intro) cat <<'PROMPT' ;;
 Reconcile the scans
 
-Dispatch scanned some parcels more than once. In scans.txt, keep
-only records whose zone is NORTH and whose status is READY.
-Find the alphabetically first parcel ID and count the distinct parcel
-IDs in those records.
+Your task
+The turnstile scanners logged some parcels more than once. In scans.txt,
+keep only records whose zone is NORTH and whose status is READY. Find
+the alphabetically first parcel ID and count the distinct parcel IDs in
+those records.
 
+Try this
 Try printf '%s\n' 'desk|OPEN' | awk -F '|' '{print $2}'. It prints OPEN.
 -F sets the field separator and $2 selects the second field. Read the
 header of scans.txt to see which fields you need.
@@ -1038,8 +1108,10 @@ ANSWER
         6:intro) cat <<'PROMPT' ;;
 Read the docs
 
-Dispatch needs the number of warning lines in dispatch.log.
+Your task
+The night dispatcher needs the number of warning lines in dispatch.log.
 
+Try this
 1. Read Bash's help for read (in Zsh, use bash -c 'help read').
    Find the short option that preserves literal backslashes.
 2. Use man grep or grep --help to find the short option that counts
@@ -1061,11 +1133,14 @@ ANSWER
         7:intro) cat <<'PROMPT' ;;
 Unlock the note
 
-Dispatch left you a note named delivery-note.txt. Check its owner,
-group, and permissions. The owner can write to it but needs read
-access too. Add read permission for the owner and leave the other
-permissions as they are. Then read the note and submit its flag.
+Your task
+The courier at the relay station left you a note named
+delivery-note.txt. Check its owner, group, and permissions. The owner
+can write to it but needs read access too. Add read permission for the
+owner and leave the other permissions as they are. Then read the note
+and submit its flag.
 
+Try this
 For example, chmod u+r schedule.txt gives the owner of schedule.txt
 read access. The u selects the owner, + adds permission, and r means
 read. Use that pattern with the note's filename.
@@ -1085,13 +1160,16 @@ ANSWER
         8:intro) cat <<'PROMPT' ;;
 Two ways to link
 
-Dispatch wants two names for the same route sheet, source.txt.
+Your task
+The station map and the street kiosk need two names for the same route
+sheet, source.txt.
 
 1. Make a symbolic link named shortcut that points to source.txt.
    Inspect the path stored in shortcut.
 2. Make a hard link named mirror to source.txt. Compare their inode
    numbers to see whether they refer to the same file.
 
+Try this
 The argument order is ln existing-file new-name. Add -s to create a
 symbolic link. Try readlink shortcut to see its stored path. In ls -i
 output, the number before each name is its inode. Compare source.txt and
@@ -1114,37 +1192,67 @@ ANSWER
         9:intro) cat <<'PROMPT' ;;
 Edit the shift notes
 
-Open shift-notes.txt in Vim and search for BAY-07. On the next line,
-change status=waiting to status=ready. Save the file and exit Vim.
-Press Esc, type /BAY-07, and press Enter to jump to the entry.
-Move to the status line and press i to edit. When the text looks
-right, press Esc, type :wq, and press Enter to write the file and quit.
+Your task
+The dock display takes its status from shift-notes.txt. Update it with
+Nano, Vim, or Neovim. Find BAY-07 and change the line immediately below
+it from status=waiting to status=ready.
 
-If Vim isn't installed, you can use Neovim.
+Try this
+Nano
+  Run nano shift-notes.txt. Use the search shortcut shown at the bottom
+  of the screen (for example, ^F means Ctrl+F). Type BAY-07 and press
+  Enter. Arrow down to the status line and edit it directly.
+  Press Ctrl+O, then Enter to save under the same name. Press Ctrl+X to exit.
+
+Vim or Neovim
+  Run vim shift-notes.txt or nvim shift-notes.txt. Press Esc, type
+  /BAY-07, and press Enter. Move to the status line and press i to edit.
+  When the text looks right, press Esc, type :wq, and press Enter.
 
 Suggested commands
-  vim  nvim
+  nano  vim  nvim
 PROMPT
-        9:hint) printf 'In Vim, searching and editing happen in different modes. Find the bay in Normal mode before changing its status.\n' ;;
+        9:hint) printf 'Search for BAY-07 to land on the bay heading. Its status is on the next line. In Nano the search shortcut is shown along the bottom; in Vim or Neovim press Esc and use /.\n' ;;
         9:answer) cat <<'ANSWER' ;;
-Open shift-notes.txt with vim or nvim. In Normal mode, type /BAY-07
-and press Enter. Press j to move down one line, then cc to replace
-that line. Type status=ready, press Esc, then type :wq and press Enter.
+In Nano, open nano shift-notes.txt. Use Search (called Where Is in some
+versions) to find BAY-07. Arrow down, move to the end of the status
+line, erase waiting, and type ready. Press Ctrl+O, Enter, then Ctrl+X.
+
+In Vim or Neovim, open shift-notes.txt, press Esc, type /BAY-07 and
+press Enter. Press j to move down one line, then cc to replace that
+line. Type status=ready, press Esc, then type :wq and press Enter.
 ANSWER
-        9:debrief) printf 'In Vim, / searches in Normal mode and i starts Insert mode. Esc returns to Normal mode. :wq saves and quits.\n' ;;
+        9:debrief) printf 'Searching for the bay heading takes you to the right record. Nano lets you edit it directly. In Vim and Neovim, i enters Insert mode and Esc returns to Normal mode.\n' ;;
         10:intro) cat <<'PROMPT' ;;
 Switch shells
 
-The next dispatch needs to come from sh. First, use ps to identify
-your current shell. Then start sh and check again. The shell variable
-$$ gives you the PID of the shell you're typing in. Look for how ps
-can display information about a single PID.
+Your task
+The old ferry terminal accepts dispatches from a shell named sh.
 
-Run bn submit while you're still in sh.
-Afterward, use exit to return to your usual lab shell.
+Try this
+1. At the lab prompt, run these commands one at a time:
+
+     echo "$SHELL"
+     ps -p "$$" -o comm=
+
+   The first command usually shows your login shell, such as /bin/bash.
+   The second shows the name of the shell running right now. The shell
+   replaces $$ with its process ID, and ps looks up that process.
+
+2. To enter sh, type this command by itself and press Enter:
+
+     sh
+
+   You're now typing in a new shell in the same directory. Its prompt
+   may look different. Run ps -p "$$" -o comm= again and look for sh.
+   Try echo "$SHELL" again too: sh inherits that value, so it can still
+   show the same login shell you saw earlier.
+
+3. At the sh prompt, run bn submit. Once your work is accepted, type
+   exit and press Enter to return to the lab shell.
 
 Suggested commands
-  ps  sh  cat  man
+  echo  ps  sh  exit
 PROMPT
         10:hint) printf 'The shell you start inside another shell gets its own PID. Compare the process information before and after the switch.\n' ;;
         10:answer) cat <<'ANSWER' ;;
@@ -1159,29 +1267,52 @@ ANSWER
         11:intro) cat <<'PROMPT' ;;
 Fingerprint a key
 
-Create an SSH key pair for this exercise. Run ssh-keygen and enter
-./training-key at the save prompt so both files stay in this folder.
+Your task
+Make a practice key for the relay operator and record its public
+fingerprint. Save the practice key in this challenge folder. The ~/.ssh
+directory is for your personal SSH keys.
 
-Identify the public key, then use ssh-keygen to display its
-fingerprint. Save just the SHA256:... token on one line in
-fingerprint.txt.
+Try this
+1. Run pwd to see where you are. If you are unsure, run bn current.
+   It gives you a cd command if you need to enter the challenge folder.
 
-The public key has a .pub suffix. For a key named example.pub,
-ssh-keygen -lf example.pub displays its fingerprint. The number before
-the SHA256 token is the key size.
+2. If training-key and training-key.pub already exist here, go to step 3.
+   Otherwise, type the whole command, including -f:
 
-Keep the private key in the lab folder. This task uses the fingerprint
-and runs entirely on your VM.
+     ssh-keygen -t ed25519 -f ./training-key
+
+   The -f option sets the filename up front. The ./ means "in this
+   directory." If asked to overwrite a file, answer n. For a new key,
+   the next prompt asks for a passphrase. For this
+   practice key, you can press Enter twice to leave the passphrase empty.
+
+   If you see "Enter file in which to save the key", press Ctrl+C and
+   start again with the full command above. Pressing Enter at that
+   filename prompt can accept a default path under ~/.ssh.
+
+3. Run ls -l ./training-key ./training-key.pub to check both files are
+   here. Keep training-key private. Display the public key fingerprint:
+
+     ssh-keygen -lf ./training-key.pub
+
+   The first number is the key size. Save only the SHA256:... token
+   in fingerprint.txt.
 
 Suggested commands
-  ssh-keygen  ls  man  vim  nvim  cat
+  pwd  ls  ssh-keygen  man
 PROMPT
-        11:hint) printf 'The public key usually has an extra filename extension. Look for fingerprinting in the key generator’s manual.\n' ;;
+        11:hint) printf 'From the challenge folder, use -f ./training-key when generating the key. Use the .pub file with ssh-keygen -l to display its fingerprint.\n' ;;
         11:answer) cat <<'ANSWER' ;;
-Run ssh-keygen and give ./training-key as the save path. If you
-already created the pair, use the existing files.
+Run bn current and enter the challenge folder if needed. If you already
+created the training key pair here, reuse it. Otherwise generate it with:
 
-  ssh-keygen -l -E sha256 -f training-key.pub
+  ssh-keygen -t ed25519 -f ./training-key
+
+If prompted to overwrite a file, answer n and inspect the existing files.
+If the program asks where to save the key, cancel with Ctrl+C and use the
+full command above. Once both files are in the challenge folder, run:
+
+  ssh-keygen -l -E sha256 -f ./training-key.pub
 
 Copy only the SHA256:... token from the output into fingerprint.txt.
 ANSWER
@@ -1189,11 +1320,14 @@ ANSWER
         12:intro) cat <<'PROMPT' ;;
 Find your own process
 
-From this challenge folder, start sleep for about two minutes.
-Put it in the background by ending its command with &. The shell
-shows a job number and a process ID (PID).
+Your task
+The rooftop antenna crew needs a live timer to identify. From this
+challenge folder, start sleep for about two minutes. Put it in the
+background by ending its command with &. The shell shows a job number
+and a process ID (PID).
 
 Use ps to inspect that PID. Save only the PID in process-id.txt.
+Try this
 If the shell prints [1] 4821, 1 is the job number and 4821 is the PID.
 Right after starting the timer, try ps -p "$!". The shell replaces $!
 with the PID of the background job you just started. Look for sleep.
@@ -1215,12 +1349,17 @@ ANSWER
         13:intro) cat <<'PROMPT' ;;
 Read the system label
 
-Dispatch needs two facts about this VM. Use uname to find the
-kernel release and the machine hardware name, also called the
-architecture.
+Your task
+The relay maintenance log needs two facts about this machine. Use uname
+to find the kernel release and the machine hardware name, also called
+the architecture.
 
 Write them in system-report.txt, one value per line. Put the kernel
 release first and the architecture second.
+
+Try this
+  uname --help
+Look for the options for kernel release and machine hardware name.
 
 Suggested commands
   uname  man  vim  nvim  cat
@@ -1236,10 +1375,13 @@ ANSWER
         14:intro) cat <<'PROMPT' ;;
 Weigh the parcels
 
-There are several parcel directories under parcels. Use df to identify
-the filesystem type that stores this challenge folder. Then use du
-to see which parcel directory uses the most disk space.
+Your task
+The dock terminal is short on storage. Its parcel directories are under
+parcels. Use df to identify the filesystem type that stores this
+challenge folder. Then use du to see which parcel directory uses the
+most disk space.
 
+Try this
 Try df -T . and look under Type. The dot means your current folder.
 Try du -sk parcels/* for one total per parcel in KiB. Compare the
 numbers in the first column.
@@ -1263,13 +1405,19 @@ ANSWER
         15:intro) cat <<'PROMPT' ;;
 Find the loopback
 
-Loopback lets a machine talk to itself. Use ip to inspect the VM's
-interfaces and find the IPv4 address for localhost. The address is
-shown with a slash and a prefix length, such as 192.0.2.4/24.
+Your task
+Before the relay goes online, check its local interface. Loopback lets a
+machine talk to itself. Use ip to inspect the VM's interfaces and find
+the IPv4 address for localhost. The address is shown with a slash and a
+prefix length, such as 192.0.2.4/24.
 
 In network-report.txt, put the loopback interface name on the first
 line. Put its IPv4 address, including the slash and prefix length,
 on the second line.
+
+Try this
+  ip -4 address show
+Look for the interface whose address has scope host.
 
 Suggested commands
   ip  man  vim  nvim  cat
@@ -1286,9 +1434,12 @@ ANSWER
         16:intro) cat <<'PROMPT' ;;
 See what's listening
 
-Read sockets.txt, a captured TCP socket listing. Which listening socket is
-bound only to IPv4 loopback? Submit its numeric local port directly.
+Your task
+Read sockets.txt, a TCP socket listing captured at the signal desk.
+Which listening socket is bound only to IPv4 loopback? Submit its
+numeric local port directly.
 
+Try this
 For example, a LISTEN row with local address 127.0.0.1:4321 accepts
 loopback connections on port 4321. A listener on 0.0.0.0:4321 accepts
 connections on all local IPv4 interfaces. Read the Local Address column
@@ -1308,15 +1459,26 @@ ANSWER
         17:intro) cat <<'PROMPT' ;;
 Find the latest dispatch warning
 
-Inspect the last 60 entries in logs/dispatch.log. Find the newest
-entry with level WARN from the dispatch service. The window also
-contains warnings from other services and flags on unrelated entries.
+Your task
+The station just handed over the night shift. Inspect the last 60
+entries in logs/dispatch.log. Find the newest entry with level WARN from
+the dispatch service. The window also contains warnings from other
+services and flags on unrelated entries.
+
+Try this
+Start with a three-line preview. From the challenge folder, run:
+
+  cat logs/dispatch.log | tail -n 3
+
+cat reads the log. The pipe (|) sends its lines to tail, and -n 3 tells
+tail to print the last three lines in their original order. Change 3
+to 60 to see the part of the log you need to search.
 
 Write just the matching ticket ID, including the TICKET- prefix,
 in latest-ticket.txt. Submit the flag on that same line.
 
 Suggested commands
-  tail  grep  man  vim  nvim
+  cat  tail  grep  man  vim  nvim
 PROMPT
         17:hint) printf 'Check how to change how many entries you see at the end of the log. Match both the level and the service before comparing timestamps.\n' ;;
         17:answer)
@@ -1331,14 +1493,19 @@ ANSWER
         18:intro) cat <<'PROMPT' ;;
 Identify the mystery parcel
 
-The parcels share the .dat extension. Use file to find the
-one that contains gzip-compressed data. Write its original filename,
-including .dat, in parcel-name.txt.
+Your task
+The night ferry delivered a crate of data parcels, all labeled .dat. Use
+file to find the one that contains gzip-compressed data. Write its
+original filename, including .dat, in parcel-name.txt.
 
 Read the contents of the gzip parcel and submit its flag. If gunzip
 reports an unknown suffix, copy the compressed parcel to a name ending
 in .gz and run gunzip on that copy. Keep the original .dat name for
 your report.
+
+Try this
+  file parcel-*.dat
+Read the format printed next to each filename.
 
 Suggested commands
   file  gzip  gunzip  man  vim  nvim
@@ -1359,8 +1526,14 @@ ANSWER
         19:intro) cat <<'PROMPT' ;;
 Set up the staging area
 
-Dispatch needs a staging area. Create a directory named staging.
-Inside it, create an empty file called arrival.txt.
+Your task
+The drone dock needs a staging area for its first arrival. Create a
+directory named staging. Inside it, create an empty file called
+arrival.txt.
+
+Try this
+  mkdir staging
+Use ls to check the directory appeared before creating the file inside it.
 
 Suggested commands
   mkdir  touch  ls  cat
@@ -1375,8 +1548,14 @@ ANSWER
         20:intro) cat <<'PROMPT' ;;
 Copy and rename a manifest
 
-Make a copy of manifest.txt named backup.txt. Leave manifest.txt
-in place. Then rename draft.txt to ready.txt in this folder.
+Your task
+Before the courier kiosk opens, make a copy of manifest.txt named
+backup.txt. Leave manifest.txt in place. Then rename draft.txt to
+ready.txt in this folder.
+
+Try this
+  ls
+Identify the two input files before you copy or rename either one.
 
 Suggested commands
   cp  mv  ls  cat
@@ -1390,8 +1569,14 @@ ANSWER
         21:intro) cat <<'PROMPT' ;;
 Clear the scratch space
 
-Remove the two practice files inside scratch. Once the directory
-is empty, remove it too. Leave keep.txt in the challenge folder.
+Your task
+Clear the route printer’s scratch space. Remove the two practice files
+inside scratch. Once the directory is empty, remove it too. Leave
+keep.txt in the challenge folder.
+
+Try this
+  ls scratch
+Read the names inside the directory before you remove them.
 
 Suggested commands
   rm  rmdir  ls  cat
@@ -1406,10 +1591,12 @@ ANSWER
         22:intro) cat <<'PROMPT' ;;
 Select the route sheets
 
-The directory delivery batch contains several files. Copy every
-file whose name starts with route and ends in .txt into selected.
-Keep the original files in place.
+Your task
+The courier kiosk stores its outgoing files in the directory delivery
+batch. Copy every file whose name starts with route and ends in .txt
+into selected. Keep the original files in place.
 
+Try this
 Try ls 'delivery batch'/*.txt. The quotes keep the folder name together.
 The * sits outside the quotes so the shell can expand it into filenames.
 Narrow the pattern until ls shows only the sheets you want, then copy them.
@@ -1429,17 +1616,20 @@ ANSWER
         23:intro) cat <<'PROMPT' ;;
 Write and append a report
 
-Try these commands with a practice file:
+Your task
+The night shift needs a two-line report for the dock terminal. Use
+printf and shell redirection to write Shift opened as the first line of
+shift-report.txt. Run a second command to append Parcel received on the
+next line.
+
+Try this
+With a practice file, run:
   printf '%s\n' 'Truck arrived' > practice.txt
   printf '%s\n' 'Gate closed' >> practice.txt
   cat practice.txt
 
 %s prints the supplied text and \n ends the line. The shell's > creates
 or replaces the file. >> adds to the end, keeping the first line.
-
-Use printf and shell redirection to write Shift opened as the
-first line of shift-report.txt. Run a second command to append
-Parcel received on the next line.
 
 Check that the report contains both lines in order.
 
@@ -1456,6 +1646,11 @@ ANSWER
         24:intro) cat <<'PROMPT' ;;
 Separate output and errors
 
+Your task
+The drone gate sends arrivals and scanner faults to the same terminal.
+Save normal output in reception.txt and errors in problems.txt.
+
+Try this
 Run chmod u+x check-in.sh to give yourself permission to run the script.
 Here u means the file's owner, + adds a permission, and x means execute.
 You can now run it as ./check-in.sh from this folder.
@@ -1470,8 +1665,7 @@ ls lists the existing file on stdout. The pipe sends that list to tee,
 which shows it and saves it in listed.txt. The shell sends the error
 about the missing file to errors-example.txt. Use cat to compare them.
 
-Save the error in problems.txt. Use tee to save the normal status
-in reception.txt and still see it on your terminal.
+Apply this to ./check-in.sh. Keep its normal status visible as tee saves it.
 
 Suggested commands
   chmod  tee  cat  ls
@@ -1489,10 +1683,21 @@ ANSWER
         25:intro) cat <<'PROMPT' ;;
 Compare the manifests
 
-Compare yesterday.txt and today.txt. One parcel's status changed.
-Try diff -u yesterday.txt today.txt. Below the headers, a line starting
-with - shows the old record and + shows the new one. Read the parcel ID
-on that pair and write just the ID in changed-parcel.txt.
+Your task
+Compare the night ferry manifests yesterday.txt and today.txt. One
+parcel's status changed.
+
+Try this
+Try diff -u yesterday.txt today.txt.
+Below the headers, a line starting with - shows the old record and +
+shows the new one. Read the parcel ID on that pair and write just the ID
+in changed-parcel.txt.
+
+Shell tip
+Try this at the interactive lab prompt: run pwd, then type !! and press
+Enter to repeat pwd. Run history to see numbered commands. If pwd is
+entry 12, type !12 to run it again. Use the number from your own list:
+!n runs the entire command at entry n, including any redirections.
 
 Suggested commands
   diff  cat  vim  nvim
@@ -1508,10 +1713,13 @@ ANSWER
         26:intro) cat <<'PROMPT' ;;
 Find repeated scans
 
-Some IDs in scans.txt appear on consecutive lines. Write one copy
-of each repeated group to duplicate-ids.txt, in the order they
-appear. Count neighboring repeats only.
+Your task
+The east gate scanner sometimes reads a badge twice. Some IDs in
+scans.txt appear on consecutive lines. Write one copy of each repeated
+group to duplicate-ids.txt, in the order they appear. Count neighboring
+repeats only.
 
+Try this
 Try printf '%s\n' A A B A | uniq -d. It prints A once because the first
 two lines match. The last A stands alone. Keep the scan file in its
 original order so neighboring still means what it did at the scanner.
@@ -1530,8 +1738,9 @@ ANSWER
         27:intro) cat <<'PROMPT' ;;
 Rebuild the dispatch packet
 
-The night shift needs two route sheets. The approval log in records
-lists decisions for both shifts. Find the revisions approved for
+Your task
+Neon Harbor’s night couriers need two route sheets. The approval log in
+records lists decisions for both shifts. Find the revisions approved for
 NIGHT and locate those sheets under warehouse.
 
 Create a handoff directory with these three files.
@@ -1563,9 +1772,11 @@ ANSWER
         28:intro) cat <<'PROMPT' ;;
 Audit the unresolved holds
 
-Audit events.log for dock EAST. Each row records a status change.
-Rows are in time order, oldest first. A ticket's last row gives
-its current status. EAST-ANNEX is a separate dock.
+Your task
+The east dock signal board is being rebuilt from its log. Audit
+events.log for dock EAST. Each row records a status change. Rows are in
+time order, oldest first. A ticket's last row gives its current status.
+EAST-ANNEX is a separate dock.
 
 Optional documentation practice: look up stable sort in info coreutils
 or sort --help. Try sort -s -t '|' -k3,3 events.log and inspect a ticket
@@ -1586,9 +1797,10 @@ ANSWER
         29:intro) cat <<'PROMPT' ;;
 Reconcile the intake
 
-Compare plan.txt, the expected inventory, with intake.txt, the
-received scans. Audit only the SOUTH zone. SOUTH-ANNEX is a
-separate zone. Repeated scans count as one crate.
+Your task
+The ferry has unloaded. Compare plan.txt, the expected inventory, with
+intake.txt, the received scans. Audit only the SOUTH zone. SOUTH-ANNEX
+is a separate zone. Repeated scans count as one crate.
 
 Put the IDs of expected crates with no scan in missing.txt.
 Put the IDs of scanned crates absent from the plan in extra.txt.
@@ -1609,9 +1821,11 @@ ANSWER
         30:intro) cat <<'PROMPT' ;;
 Recover the verified handoff
 
-Several shifts left notes in recovery.tar.gz. Find the handoff
-note for BATCH-044 whose state is VERIFIED. Notes for the same
-batch can have other states.
+Your task
+The district mesh is dark. A relay archive survived the power cut.
+Several shifts left notes in recovery.tar.gz. Find the handoff note for
+BATCH-044 whose state is VERIFIED. Notes for the same batch can have
+other states.
 
 Copy the verified note into recovery/verified-note.txt. In
 recovery/summary.txt, record its dock code on the first line and
@@ -1632,8 +1846,10 @@ ANSWER
         31:intro) cat <<'PROMPT' ;;
 Print the dispatch labels
 
-Use one printf command with a format string and three arguments to
-write these names to labels.txt, one per line, in this order.
+Your task
+The dock printer needs route and parcel labels. Use one printf command
+with a format string and three arguments to write these names to
+labels.txt, one per line, in this order.
 
   north-route.txt
   west-route.txt
@@ -1643,6 +1859,7 @@ Then use printf to write BOX-007, BOX-024, and BOX-105 to boxes.txt,
 one per line. Give printf the numbers 7, 24, and 105 as arguments
 and use the format string to add the zero padding.
 
+Try this
 For example, printf '%s\n' alpha beta prints each word on its own
 line because printf reuses the format for the extra argument.
 Try printf 'BAY-%03d\n' 4 12. It prints BAY-004 and BAY-012 on separate
@@ -1661,11 +1878,14 @@ ANSWER
         32:intro) cat <<'PROMPT' ;;
 Pass arguments to a script
 
-Create label.sh for Bash. It takes a dock as its first argument
-and a parcel ID as its second. Print a single line in this form.
+Your task
+The parcel kiosk needs a Bash script named label.sh. It takes a dock as
+its first argument and a parcel ID as its second. Print a single line in
+this form.
 
   EAST: BOX-042
 
+Try this
 In a script, $1 and $2 refer to the first and second arguments.
 Quote their expansions so a value with spaces stays together.
 
@@ -1705,14 +1925,16 @@ ANSWER
         33:intro) cat <<'PROMPT' ;;
 Make a dispatch decision
 
-Create a Bash script named decision.sh. It receives a status and
-a pallet count. Use the rules below to print exactly one word.
+Your task
+The pallet gate needs a Bash script named decision.sh. It receives a
+status and a pallet count. Use the rules below to print exactly one
+word.
 
   HOLD, with any count                   REVIEW
   READY, with at least 10 pallets         LOAD
   Anything else                          WAIT
 
-Example Bash script
+Try this
 
 This example is about staffing a desk. Use it as a model for the
 structure of decision.sh, then apply the dispatch rules above.
@@ -1760,10 +1982,13 @@ ANSWER
         34:intro) cat <<'PROMPT' ;;
 Loop over the queue
 
-Write a Bash script named queue.sh that accepts any number of
-route labels. Print one line per argument, with Queued: before
-the label. Keep the original order. Labels may contain spaces.
+Your task
+The courier queue on the station’s light wall needs a Bash script named
+queue.sh that accepts any number of route labels. Print one line per
+argument, with Queued: before the label. Keep the original order. Labels
+may contain spaces.
 
+Try this
 Try bash queue.sh east "west gate". It should print the two lines below.
   Queued: east
   Queued: west gate
@@ -1786,13 +2011,14 @@ ANSWER
         35:intro) cat <<'PROMPT' ;;
 Read from a pipeline
 
-Create ready.sh. It receives lines on standard input. Each line
-has three fields separated by |, with the dock first, then the
-status, then the ID.
-Print the ID when the dock is exactly EAST and the status is
-exactly READY. Keep the input order and preserve repeated matches.
+Your task
+Build ready.sh for the east dock’s incoming feed. It receives lines on
+standard input. Each line has three fields separated by |, with the dock
+first, then the status, then the ID. Print the ID when the dock is
+exactly EAST and the status is exactly READY. Keep the input order and
+preserve repeated matches.
 
-Try a small example at the shell prompt
+Try this
 
   printf '%s\n' 'front desk|Box\A' 'west gate|Box B' |
   while IFS='|' read -r location label; do
@@ -1863,12 +2089,14 @@ ANSWER
         36:intro) cat <<'PROMPT' ;;
 Remember the last status
 
-Write states.awk for use with updates.txt. Each row has a parcel
-ID and a status separated by |, oldest to newest. Print one row
-for each parcel whose final status is HOLD or WAIT. Use the same
-ID|STATUS format. The rows can be in any order.
+Your task
+The night dispatcher needs the last known state of each parcel. Write
+states.awk for use with updates.txt. Each row has a parcel ID and a
+status separated by |, oldest to newest. Print one row for each parcel
+whose final status is HOLD or WAIT. Use the same ID|STATUS format. The
+rows can be in any order.
 
-Practice example
+Try this
 
 Save these three rows in example.txt.
 
@@ -1941,7 +2169,8 @@ ANSWER
         37:intro) cat <<'PROMPT' ;;
 Build the dispatch timeline
 
-Two scanners recorded the same shift in separate logs under scans.
+Your task
+Two dock scanners recorded the night shift in separate logs under scans.
 The rows contain a time, dock, event, and ticket ID, separated by |.
 
 Build timeline.txt from both logs. Keep events for dock WEST with
@@ -1963,10 +2192,13 @@ ANSWER
         39:intro) cat <<'PROMPT' ;;
 Audit the overnight permission changes
 
-Two tools gained set-user-ID (SUID) overnight. Review the fictional inventory
-snapshots yesterday.txt and today.txt (path|owner|mode). A leading 4 in
-these four-digit modes marks SUID. Compare by path and consult tickets.txt
-(ticket|decision|path|requested mode). Only APPROVED tickets authorize changes.
+Your task
+Two tools on the fictional dispatch terminal gained set-user-ID (SUID)
+overnight. Review the fictional inventory snapshots yesterday.txt and
+today.txt (path|owner|mode). A leading 4 in these four-digit modes marks
+SUID. Compare by path and consult tickets.txt
+(ticket|decision|path|requested mode). Only APPROVED tickets authorize
+changes.
 
 Write audit.txt with two lines, using the literal labels shown here:
   INVESTIGATE|path|previous mode|new mode
@@ -1989,10 +2221,12 @@ ANSWER
         40:intro) cat <<'PROMPT' ;;
 The shipment that will not import
 
-Start with import.log. Compare rejected.txt with the small accepted sample
-example.txt. The importer requires LF after every record, including the
-last. Parcel IDs have the form PK- followed by four digits. Destination
-names are exact, including repeated spaces.
+Your task
+The ferry manifest looks fine on screen, but the kiosk rejected it.
+Start with import.log. Compare rejected.txt with the small accepted
+sample example.txt. The importer requires LF after every record,
+including the last. Parcel IDs have the form PK- followed by four
+digits. Destination names are exact, including repeated spaces.
 
 Produce repaired.txt from rejected.txt. Keep the header, record order,
 destinations and original input intact. Use bn check, then bn submit.
@@ -2006,8 +2240,9 @@ ANSWER
         38:intro) cat <<'PROMPT' ;;
 Apply the approved access
 
-Dispatch has logged permission requests for 64 route files. Your job
-is to apply the approved night-shift requests to the actual files.
+Your task
+The courier mesh has logged permission requests for 64 route files. Your
+job is to apply the approved night-shift requests to the actual files.
 
 1. Find the requests to apply.
 

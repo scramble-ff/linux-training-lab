@@ -27,10 +27,10 @@ menu_guide() {
     cat <<'GUIDE'
 How to play
 
-Use the Up and Down arrows to move > to an option. Press Enter to open it.
-In a submenu, select Back to return, or Cancel to leave a confirmation.
+Use the Up and Down arrows to move the fish (><>) to an option. Press Enter to open it.
+In submenus, Esc returns to the previous screen or cancels a confirmation.
 
-First visit     Choose Setup, then Guided training to start lesson 1.
+First visit     Choose Start guided training to open lesson 1.
 Return visit    Choose Continue course to open your current lesson.
 In a lesson     Read the README, then type Linux commands at
                 the shell prompt. Type bn current to reread the task.
@@ -41,7 +41,8 @@ Found a value?  Type submit and enter the requested finding at the prompt.
                 Every lesson ends with a How to submit section.
 Puzzles         Use bn check for objective feedback and bn submit to finish.
 Fresh attempt   Use bn restart to preview a reset of the active lesson.
-Next lesson     After a correct submission, choose Move, Stay, or Always move.
+Next lesson     After a correct submission, choose Move to next challenge,
+                Stay and review this challenge, or Always move to next challenge.
                 If you stay, bn current shows how to reach the next lesson.
 Take a break    Type menu at the lesson prompt to return to the main menu.
                 Choose Exit to keep working on this machine later, or
@@ -50,8 +51,9 @@ Take a break    Type menu at the lesson prompt to return to the main menu.
 Table of contents groups lessons by topic.
 With an installed course, picking the current lesson resumes it. Picking
 another opens separate practice. A [~] marks a walkthrough completion;
-[x] includes independent replays. Course options includes progress,
-restart, navigation preferences and teardown.
+[x] includes independent replays. Course options includes restart,
+navigation preferences and teardown. Open Player Stats to review
+lessons where you used a hint or a walkthrough.
 GUIDE
 }
 
@@ -88,7 +90,7 @@ Saving and restoring
   in your installed course. To export practice, use bn save in that shell.
   bn save defaults to ~/beginnix-progress.txt. Save outside the lab so
   the checkpoint survives teardown. Teardown also removes archived labs,
-  practice sessions, lesson-shell history, and the Always move preference.
+  practice sessions, lesson-shell history, and your navigation preference.
 
 Command-line shortcuts
   bash lab.sh setup             Open the course menu.
@@ -132,6 +134,11 @@ load_state() {
         adjust_start_position
         if (( current == 0 )); then current=$(next_challenge); fi
     fi
+    # Older 40-lesson runs used 41 to mean complete. The new lesson
+    # cannot be active in a run starting beyond its playable position.
+    if (( current == 41 )) && (( first_challenge > $(challenge_position 41) )); then
+        current=$(next_challenge)
+    fi
 }
 
 is_solved() {
@@ -162,25 +169,43 @@ init_state() {
     score=0 mistakes=0 attempts=0 finished=, earned=, reassessed=,
     prepare "$current"
     save_state
-    touch -- "$state_dir/.expanded-search-fixtures" "$state_dir/.lesson-prompts-v31"
+    touch -- "$state_dir/.expanded-search-fixtures" "$state_dir/.lesson-prompts-v31" "$state_dir/.hidden-note-v45" "$state_dir/.lesson-prompts-v52"
 }
 
 lesson_heading() {
     local color='' reset=''
     if [[ -t 1 && ${TERM:-dumb} != dumb && -z ${NO_COLOR:-} ]]; then
-        color=$'\033[1;96m' reset=$'\033[0m'
+        case "${2:-task}" in
+            submit) color=$'\033[1;95m' ;;
+            success) color=$'\033[1;92m' ;;
+            milestone) color=$'\033[1;93m' ;;
+            example|task) color=$'\033[1;92m' ;;
+            *) color=$'\033[1;96m' ;;
+        esac
+        reset=$'\033[0m'
     fi
-    printf '\n%s── %s ──%s\n' "$color" "$1" "$reset"
+    printf '\n%s━━[ %s ]━━%s\n' "$color" "$1" "$reset"
 }
 
 display_lesson() {
-    local line title
+    local line title position section white='' reset=''
+    position=$(challenge_position "$current")
+    section=$(section_index "$position")
+    if [[ -t 1 && ${TERM:-dumb} != dumb && -z ${NO_COLOR:-} ]]; then
+        white=$'\033[1;97m' reset=$'\033[0m'
+    fi
     {
         IFS= read -r title || return 1
-        lesson_heading "$(printf 'Challenge %02d of %d · %s' "$(challenge_position "$current")" "$total" "$title")"
+        printf '\n Neon Harbor Dispatch / %s\n' "${sections[section]}"
+        lesson_heading "$(printf 'Challenge %02d of %d · %s' "$position" "$total" "$title")"
         while IFS= read -r line; do
-            if [[ "$line" == 'Suggested commands' || "$line" == 'How to submit' ]]; then lesson_heading "$line"
-            else printf '%s\n' "$line"; fi
+            case "$line" in
+                'Your task'|'Suggested commands'|'Shell tip') lesson_heading "$line" ;;
+                'Try this') lesson_heading "$line" example ;;
+                'How to submit') lesson_heading "$line" submit ;;
+                '  '*) printf '%s%s%s\n' "$white" "$line" "$reset" ;;
+                *) printf '%s\n' "$line" ;;
+            esac
         done
     } < "$1/README.txt"
 }
@@ -206,7 +231,7 @@ show_current() {
 }
 
 require_install() {
-    installed || fail 'Lab installation not found. Run bash lab.sh, then choose Setup.'
+    installed || fail 'Lab installation not found. Run bash lab.sh and choose Start guided training.'
 }
 
 lock_installed() {
@@ -225,13 +250,30 @@ install_runner() {
     ln -sfnT -- beginnix "$root/bin/lab"
     ln -sfnT -- beginnix "$root/bin/bn"
     cat > "$root/commands.sh" <<'COMMANDS'
+# Read the active lesson from this run, even when reviewing an older folder.
+_bn_update_prompt() {
+    local state_file="${BEGINNIX_TERMINAL_DIR%/*}/state" seed started active remaining id position=0 label='Run complete'
+    IFS=' ' read -r seed started active remaining < "$state_file" || return
+    [[ $active != "${_bn_prompt_id:-}" ]] || return 0
+    for id in "${_bn_course_ids[@]}"; do
+        position=$((position + 1))
+        if [[ $id == "$active" ]]; then
+            printf -v label 'Challenge %02d' "$position"
+            break
+        fi
+    done
+    PS1=${_bn_prompt_template/CHALLENGE_LABEL/$label}
+    _bn_prompt_id=$active
+}
+
 # This hook also handles a submission from a child sh when the learner
 # returns to the lesson shell. Each open terminal has its own notification.
 _bn_after_submit() {
     local previous_status=$? destination choice
     [[ ${BEGINNIX_LESSON_PID:-} == "$$" && -n ${BEGINNIX_TERMINAL_DIR:-} ]] || return "$previous_status"
     if [[ ! -d "$BEGINNIX_TERMINAL_DIR" ]]; then unset HISTFILE; exit 0; fi
-    if [[ -f "$BEGINNIX_TERMINAL_DIR/menu" ]]; then exit 0; fi
+    if [[ -f "$BEGINNIX_TERMINAL_DIR/menu" || -f "$BEGINNIX_TERMINAL_DIR/review" ]]; then exit 0; fi
+    _bn_update_prompt
     if [[ -f "$BEGINNIX_TERMINAL_DIR/restart" ]]; then
         destination=$(< "$BEGINNIX_TERMINAL_DIR/restart")
         rm -f -- "$BEGINNIX_TERMINAL_DIR/restart" "$BEGINNIX_TERMINAL_DIR/next"
@@ -242,15 +284,13 @@ _bn_after_submit() {
     destination=$(< "$BEGINNIX_TERMINAL_DIR/next")
     rm -f -- "$BEGINNIX_TERMINAL_DIR/next" || return 1
     if [[ ! -f "$HOME/.linux-training-lab/.auto-move" ]]; then
-        while :; do
-            printf '\nNext lesson: 1) Move now  2) Stay here  3) Always move\nChoice [1]: '
-            IFS= read -r choice || return 0
-            case "$choice" in
-                1|'') break ;;
-                2) printf 'Staying here. Use bn current for the next lesson.\n'; return 0 ;;
-                3) touch -- "$HOME/.linux-training-lab/.auto-move" || return 1; break ;;
-            esac
-        done
+        choice=$(command beginnix --choose-next) || return 0
+        case "$choice" in
+            2) printf 'Staying here. Use bn current for the next lesson.\n'; return 0 ;;
+            3) touch -- "$HOME/.linux-training-lab/.auto-move" || return 1 ;;
+            1) ;;
+            *) return 0 ;;
+        esac
     fi
     cd -- "$destination" && command beginnix current
 }
@@ -265,13 +305,14 @@ submit() {
     command beginnix submit "$@"
 }
 COMMANDS
+    printf '_bn_course_ids=(%s)\n' "${course_order[*]}" >> "$root/commands.sh"
     cat > "$root/.zshrc" <<'ZSHRC'
 source "$ZDOTDIR/commands.sh"
 precmd_functions+=(_bn_after_submit)
-PROMPT='[BEGINNIX LAB] %~
+_bn_prompt_template='[BEGINNIX LAB] [CHALLENGE_LABEL] %~
 %# '
 if [[ -t 2 && ${TERM:-dumb} != dumb && -z ${NO_COLOR:-} ]]; then
-    PROMPT='%K{magenta}%F{white}%B[BEGINNIX LAB]%b%f%k %B%F{cyan}%~%f%b
+    _bn_prompt_template='%K{magenta}%F{white}%B[BEGINNIX LAB] [CHALLENGE_LABEL]%b%f%k %B%F{cyan}%~%f%b
 %# '
 fi
 unset ZDOTDIR
@@ -280,9 +321,9 @@ ZSHRC
 source "$HOME/.linux-training-lab/commands.sh"
 PROMPT_COMMAND+=(_bn_after_submit)
 set -o emacs
-PS1='[BEGINNIX LAB] \w\n\$ '
+_bn_prompt_template='[BEGINNIX LAB] [CHALLENGE_LABEL] \w\n\$ '
 if [[ -t 2 && ${TERM:-dumb} != dumb && -z ${NO_COLOR:-} ]]; then
-    PS1='\[\e[1;97;45m\][BEGINNIX LAB]\[\e[0m\] \[\e[1;96m\]\w\[\e[0m\]\n\$ '
+    _bn_prompt_template='\[\e[1;97;45m\][BEGINNIX LAB] [CHALLENGE_LABEL]\[\e[0m\] \[\e[1;96m\]\w\[\e[0m\]\n\$ '
     alias ls='ls --color=auto'
 fi
 BASHRC
@@ -386,7 +427,9 @@ read_checkpoint() {
     IFS=, read -r -a entries <<< "${reassessed#,}"
     seen=,
     for id in "${entries[@]}"; do
-        is_solved "$id" && [[ "$checkpoint_revealed" == *",$id,"* && "$seen" != *",$id,"* ]] || fail "$invalid"
+        [[ "$id" == "$current" ]] || is_solved "$id" || fail "$invalid"
+        [[ "$seen" != *",$id,"* ]] &&
+            [[ "$checkpoint_revealed" == *",$id,"* || "$checkpoint_hinted" == *",$id,"* ]] || fail "$invalid"
         seen+="$id,"
     done
     adjust_start_position
@@ -406,7 +449,7 @@ restore_checkpoint() {
     IFS=, read -r -a revealed <<< "${checkpoint_hinted#,}"
     for challenge in "${revealed[@]}"; do touch -- "$state_dir/.hint-$challenge"; done
     save_state
-    touch -- "$state_dir/.expanded-search-fixtures" "$state_dir/.lesson-prompts-v31"
+    touch -- "$state_dir/.expanded-search-fixtures" "$state_dir/.lesson-prompts-v31" "$state_dir/.hidden-note-v45" "$state_dir/.lesson-prompts-v52"
 }
 
 valid_start_position() {
@@ -477,12 +520,18 @@ choose_row() {
     local key suffix size rows cols i start limit n filled empty width banner_rows
     local highlight='' reset='' label_width label row footer=' Up/Down to move   Enter to select'
     local interactive=0 cursor_menu=0 previous_size='' previous_pick=-1 previous_start=-1
-    local full_draw visible
+    local full_draw visible offset detail_line option_text padding
+    local style=${menu_style:-page} detail=${menu_detail:-} back=-1
+    for i in "${!options[@]}"; do
+        case "${options[i]}" in Back|Cancel|'Stay and review this challenge') back=$i ;; esac
+    done
+    if (( back >= 0 )); then footer+='   Esc Back'; fi
+    if [[ "$style" == next ]]; then footer=' Choice [1]   ↑/↓ or 1–3   Enter to select'; fi
     if [[ -t 0 && -t 1 ]]; then
         interactive=1
         if [[ ${TERM:-dumb} != dumb ]]; then
             cursor_menu=1
-            if [[ -z ${NO_COLOR:-} ]]; then highlight=$'\033[7;1m' reset=$'\033[0m'; fi
+            if [[ -z ${NO_COLOR:-} ]]; then highlight=$'\033[1;97;45m' reset=$'\033[0m'; fi
         fi
     fi
     pick=0
@@ -496,50 +545,74 @@ choose_row() {
         if (( ! cursor_menu )) || [[ "$rows $cols" != "$previous_size" ]]; then
             full_draw=1
             previous_size="$rows $cols"
-            if (( cursor_menu )); then
-                if (( ! screen )); then printf '\033[?1049h\033[?25l'; screen=1; fi
-                printf '\033[H\033[2J'
+            if [[ "$style" == inline || "$style" == next ]]; then
+                printf '\n %.*s\n' "$cols" "$heading"
+                limit=$((rows - 5))
+            else
+                if (( cursor_menu )); then
+                    if (( ! screen )); then printf '\033[?1049h\033[?25l'; screen=1; fi
+                    printf '\033[H\033[2J'
+                fi
+                if [[ "$style" == home ]]; then
+                    if [[ -n "$highlight" ]]; then printf '\033[1;96m'; fi
+                    show_banner
+                    printf '%s' "$reset"
+                else printf ' BEGINNIX / Neon Harbor Dispatch\n'; banner_rows=1; fi
+                width=$total
+                if (( cols < 65 )); then width=12; fi
+                printf -v filled '%*s' "$((completed * width / run_total))" ''
+                printf -v empty '%*s' "$((width - ${#filled}))" ''
+                printf ' [%s%s] %d/%d %s completed\n\n %s\n' "${filled// /#}" "${empty// /-}" "$completed" "$run_total" "$run_label" "$heading"
+                limit=$((rows - banner_rows - 6))
+                if [[ -n "$detail" ]]; then limit=$((limit-1)); fi
             fi
-            show_banner
-            width=$total
-            if (( cols < 65 )); then width=12; fi
-            printf -v filled '%*s' "$((completed * width / run_total))" ''
-            printf -v empty '%*s' "$((width - ${#filled}))" ''
-            printf ' [%s%s] %d/%d %s completed\n\n %s\n' "${filled// /#}" "${empty// /-}" "$completed" "$run_total" "$run_label" "$heading"
-            limit=$((rows - banner_rows - 6))
             if (( limit < 1 )); then limit=1; fi
             if (( ! interactive )); then limit=${#options[@]}; fi
         fi
         start=$((pick >= limit ? pick - limit + 1 : 0))
         visible=$((${#options[@]} - start))
         if (( visible > limit )); then visible=$limit; fi
-        label_width=$((cols > 5 ? cols-5 : 1))
+        label_width=$((cols > 7 ? cols-7 : 1))
         for ((i=start; i<start+visible; i++)); do
             if (( ! interactive )); then
                 printf ' %2d  %s\n' "$((i+1))" "${options[i]}"
+                if [[ -n "$detail" ]] && (( i == 0 )); then printf '     %s\n' "$detail"; fi
                 continue
             fi
             if (( ! full_draw && start == previous_start )); then
                 if (( pick == previous_pick || (i != pick && i != previous_pick) )); then continue; fi
             fi
+            option_text=${options[i]}
+            if [[ "$style" == next ]]; then option_text="$((i+1))) $option_text"; fi
+            option_text=${option_text:0:label_width}
             if (( i == pick )); then
-                printf -v label ' > %-*.*s' "$label_width" "$label_width" "${options[i]}"
+                printf -v padding '%*s' "$((label_width-${#option_text}))" ''
+                label=" ><> $option_text$padding"
                 row="$highlight${label:0:cols}$reset"
             else
-                printf -v label '   %.*s' "$label_width" "${options[i]}"
+                label="     $option_text"
                 row=${label:0:cols}
             fi
             if (( full_draw )); then
                 printf '%s\n' "$row"
             else
                 # The saved cursor is on the footer, one blank line below the list.
-                printf '\033[%dA\r%s\033[K\0338' "$((visible - (i-start) + 1))" "$row"
+                offset=$((visible - (i-start) + 1))
+                if [[ -n "$detail" ]] && (( i == start )); then offset=$((offset+1)); fi
+                printf '\033[%dA\r%s\033[K\0338' "$offset" "$row"
+            fi
+            if [[ -n "$detail" ]] && (( i == start )); then
+                detail_line=''
+                if (( start == 0 )); then printf -v detail_line '     %.*s' "$label_width" "$detail"; fi
+                if (( full_draw )); then printf '%s\n' "$detail_line"
+                elif (( previous_start != start )); then printf '\033[%dA\r%s\033[K\0338' "$((offset-1))" "$detail_line"; fi
             fi
         done
         previous_pick=$pick previous_start=$start
         if (( ! interactive )); then
             printf ' Choice (1-%d): ' "${#options[@]}"
             IFS= read -r n || exit 0
+            if [[ "$style" == next && -z "$n" ]]; then return 0; fi
             if [[ "$n" =~ ^[1-9][0-9]?$ ]] && (( n <= ${#options[@]} )); then pick=$((n-1)); return; fi
             continue
         fi
@@ -550,9 +623,13 @@ choose_row() {
         IFS= read -rsn1 key || exit 0
         case "$key" in
             '') return 0 ;;
+            [1-3]) if [[ "$style" == next ]]; then pick=$((key-1)); fi ;;
             $'\004') exit 0 ;;
             $'\033')
-                IFS= read -rsn1 -t 0.3 suffix || continue
+                if ! IFS= read -rsn1 -t 0.2 suffix; then
+                    if (( back >= 0 )); then pick=$back; return 0; fi
+                    continue
+                fi
                 [[ "$suffix" == '[' || "$suffix" == O ]] || continue
                 IFS= read -rsn1 -t 0.3 suffix || continue
                 case "$suffix" in
@@ -575,11 +652,34 @@ notify_lesson_terminal() {
     mv -fT -- "$temporary" "$BEGINNIX_TERMINAL_DIR/$1"
 }
 
+start_review_practice() {
+    local position=$1 origin=$state_dir
+    lock_installed || return 1
+    create_practice "$position" || return 1
+    if [[ "$origin" != "$root" ]]; then
+        printf '%s\n' "${origin##*.}" > "$state_dir/.review-source"
+    fi
+    remember_practice
+    exec 9<&-
+}
+
 start_shell() (
+    local position BEGINNIX_TERMINAL_DIR=''
+    export PATH="$root/bin:$PATH" HISTFILE="$root/.lesson-history-$selected_shell"
+    while :; do
+        run_lesson_shell || :
+        [[ -n ${BEGINNIX_TERMINAL_DIR:-} && -f "$BEGINNIX_TERMINAL_DIR/review" ]] || break
+        read -r position < "$BEGINNIX_TERMINAL_DIR/review"
+        valid_start_position "$position" || return 1
+        rm -rf -- "$BEGINNIX_TERMINAL_DIR"
+        start_review_practice "$position" || return 1
+    done
+)
+
+run_lesson_shell() {
     if (( current <= total )); then
         cd -- "$(folder "$current")" || return 1
     fi
-    export PATH="$root/bin:$PATH" HISTFILE="$root/.lesson-history-$selected_shell"
     if [[ -t 0 && -t 1 ]]; then
         printf '\033[2J\033[H'
         if [[ "$state_dir" != "$root" ]]; then printf 'Practice session\n\n'; fi
@@ -599,7 +699,7 @@ start_shell() (
             exec "$shell_path" -d -i
         fi
     )
-)
+}
 
 setup_install() {
     if [[ -n "$checkpoint_file" ]]; then
@@ -686,11 +786,20 @@ teardown_lab() {
 }
 
 choose_lesson() {
-    local section pos id mark end
+    local section pos id mark end count size
     local -a labels section_labels
     for section in "${!sections[@]}"; do
-        printf -v 'section_labels[section]' '(%02d–%02d) %s' "${section_starts[section]}" \
-            "$((section_starts[section+1]-1))" "${sections[section]}"
+        count=0 mark=''
+        end=${section_starts[section+1]}
+        size=$((end-section_starts[section]))
+        for ((pos=section_starts[section]; pos<end; pos++)); do
+            id=${course_order[pos-1]}
+            if is_solved "$id"; then count=$((count+1)); fi
+            if [[ "$id" == "$current" ]]; then mark='  ><> Current'; fi
+        done
+        if (( count == size )); then mark='  ✓ Complete'; fi
+        printf -v 'section_labels[section]' '(%02d–%02d) %s  %d/%d%s' "${section_starts[section]}" \
+            "$((end-1))" "${sections[section]}" "$count" "$size" "$mark"
     done
     number=0
     while :; do
@@ -716,7 +825,7 @@ choose_lesson() {
 lab_menu() {
     local run_total=$total run_label=lessons
     local enter_first=$1 practice_dir='' screen=0 pick number completed=0
-    local choice notice='' mode
+    local choice notice='' mode home_detail
     local -a options
     local -A practices=()
     if [[ "$state_dir" != "$root" ]]; then
@@ -744,7 +853,7 @@ lab_menu() {
         enter_first=0
         state_dir=$root
         unset LINUX_LAB_PRACTICE_ID
-        options=()
+        options=() home_detail=''
         completed=0 finished=, current=0 run_total=$total run_label=lessons
         if installed; then
             lock_installed
@@ -759,23 +868,30 @@ lab_menu() {
             completed=$(solved_count)
             run_total=$((total-first_challenge+1))
             if (( first_challenge >= section_starts[-2] )); then run_label=puzzles; fi
-            if (( current <= total )); then options+=("Continue course — ${lesson_titles[current]}"); fi
+            if (( current <= total )); then
+                options+=('Continue course')
+                printf -v home_detail 'Challenge %02d · %s' "$(challenge_position "$current")" "${lesson_titles[current]}"
+            fi
         else
             practice_dir=''
             practices=()
+            options+=('Start guided training')
         fi
-        options+=('Setup' 'Table of contents')
-        if [[ -n "$practice_dir" ]]; then options+=('Resume last practice'); fi
+        options+=('Table of contents')
+        if installed; then
+            options+=('Player Stats' 'Practice a challenge')
+            if [[ -n "$practice_dir" ]]; then options+=('Resume last practice'); fi
+        else options+=('More starting options'); fi
         if [[ -f "$launch_save" ]]; then options+=('Load saved course'); fi
-        if installed; then options+=('Save and quit' 'Course options'); fi
+        if installed; then options+=('Course options' 'Save and quit'); fi
         options+=('How to play' 'Exit')
-        choose_row "Main menu${notice:+ — $notice}" "${options[@]}"
+        menu_style=home menu_detail="$home_detail" choose_row "Main menu${notice:+ — $notice}" "${options[@]}"
         notice=''
         choice=${options[pick]}
         if [[ "$choice" == 'Course options' ]]; then
-            options=('View progress')
+            options=()
             if (( current <= total )); then options+=('Restart main course lesson'); fi
-            if [[ -f "$root/.auto-move" ]]; then options+=('Navigation — Always move')
+            if [[ -f "$root/.auto-move" ]]; then options+=('Navigation — Always move to next challenge')
             else options+=('Navigation — Ask after submission'); fi
             options+=('Teardown' 'Back')
             choose_row 'Course options' "${options[@]}"
@@ -783,11 +899,17 @@ lab_menu() {
         fi
         case "$choice" in
             Back) continue ;;
-            'View progress')
+            'Player Stats')
                 menu_close
-                "$root/bin/beginnix" stats
-                printf '\nPress Enter to return. '
-                IFS= read -r || break ;;
+                number=0
+                lock_installed
+                load_state
+                exec 9<&-
+                show_stats '' review
+                if (( number )); then
+                    start_review_practice "$number"
+                    enter_first=1
+                fi ;;
             'Restart main course lesson')
                 choose_row "Restart ${lesson_titles[current]}? Keep your files in previous-attempts and retain progress." 'Cancel' 'Keep attempt and restart'
                 if (( pick == 1 )); then
@@ -795,7 +917,7 @@ lab_menu() {
                 fi ;;
             Exit) break ;;
             'Navigation — '*)
-                choose_row 'After a successful submission' 'Ask again' 'Always move' 'Back'
+                choose_row 'After a successful submission' 'Ask again' 'Always move to next challenge' 'Back'
                 if (( pick == 0 )); then bash "${BASH_SOURCE[0]}" move ask
                 elif (( pick == 1 )); then bash "${BASH_SOURCE[0]}" move always; fi ;;
             'How to play')
@@ -834,12 +956,13 @@ lab_menu() {
                 state_dir=$practice_dir
                 export LINUX_LAB_PRACTICE_ID="${state_dir##*.}"
                 enter_first=1 ;;
-            Setup|'Table of contents')
+            'Start guided training'|'More starting options'|'Practice a challenge'|'Table of contents')
                 checkpoint_file=''
-                if [[ "$choice" == Setup ]]; then
+                if [[ "$choice" == 'Start guided training' ]]; then number=1
+                elif [[ "$choice" == 'More starting options' ]]; then
                     options=('Guided training' 'Puzzles' 'Choose a lesson')
-                    mode='Set up course — start with Guided training for lesson 1'
-                    if installed; then mode='Set up practice — main course progress is separate'; else options+=('Restore checkpoint'); fi
+                    mode='Choose a starting point'
+                    options+=('Restore checkpoint')
                     choose_row "$mode" "${options[@]}" 'Back'
                     (( pick < ${#options[@]} )) || continue
                     case "${options[pick]}" in
@@ -885,6 +1008,28 @@ lab_menu() {
     trap - EXIT INT TERM HUP
 }
 
+show_completion() {
+    local id=$1 position section member objective
+    position=$(challenge_position "$id")
+    section=$(section_index "$position")
+    lesson_heading "$(printf '✓ Challenge %02d complete · %s' "$position" "${lesson_titles[id]}")" success
+    if [[ -f "$state_dir/.answer-$id" ]]; then printf 'Completed with walkthrough. '
+    else printf 'Completed independently. '; fi
+    printf 'Progress saved.\n'
+    if (( ${#objectives[@]} )); then
+        for objective in "${objectives[@]}"; do printf '  ✓ %s\n' "$objective"; done
+    else
+        printf '  ✓ %s\n' "${guided_receipts[id]}"
+    fi
+    lesson_heading 'What you practiced'
+    lesson_text "$id" debrief
+    for ((member=section_starts[section]; member<section_starts[section+1]; member++)); do
+        is_solved "${course_order[member-1]}" || return 0
+    done
+    lesson_heading "Section complete · ${sections[section]}" milestone
+    printf 'You can now %s\n' "${section_skills[section],}"
+}
+
 show_hint() {
     if (( current > total )); then
         printf 'All challenges are complete.\n'
@@ -921,6 +1066,12 @@ main() {
             fi
             set -- setup
             action=setup ;;
+        --choose-next)
+            local pick
+            menu_style=next choose_row 'Next challenge' 'Move to next challenge' 'Stay and review this challenge' 'Always move to next challenge' >&2
+            printf '\n' >&2
+            printf '%d\n' "$((pick+1))"
+            return ;;
         --import-launch-save) import_course; return ;;
         help|-h|--help) action=help ;;
         setup|-i|--setup) action=setup ;;
@@ -1011,7 +1162,17 @@ main() {
                     ;;
                 stats)
                     [[ $# == 1 || ( $# == 2 && "$2" == --details ) ]] || fail 'Usage: bn stats [--details]'
-                    show_stats "${2:-}" ;;
+                    if [[ -t 0 ]] && in_lesson_terminal; then
+                        local number=0
+                        exec 9<&-
+                        show_stats "${2:-}" review
+                        if (( number )); then
+                            local request
+                            request=$(mktemp -- "$BEGINNIX_TERMINAL_DIR/.review.XXXXXX")
+                            printf '%d\n' "$number" > "$request"
+                            mv -fT -- "$request" "$BEGINNIX_TERMINAL_DIR/review"
+                        fi
+                    else show_stats "${2:-}"; fi ;;
                 move)
                     [[ $# == 2 ]] || fail 'Usage: bn move ask | always'
                     case "$2" in
@@ -1086,25 +1247,21 @@ main() {
                         save_state
                         fail 'Incorrect answer. Try again or use bn hint. Retries are free.'
                     fi
-                    if (( ${#objectives[@]} )); then grade_puzzle || return 1
+                    if (( ${#objectives[@]} )); then grade_puzzle submit || return 1
                     elif [[ "$current" != 16 || "$answer" == FLAG\{* ]]; then check_practice "$current"; fi
                     solved=$current
                     finished+="$solved,"
                     current=$(next_challenge)
                     attempts=0
                     save_state
-                    lesson_heading "Challenge $(printf '%02d' "$(challenge_position "$solved")") complete"
-                    if [[ -f "$state_dir/.answer-$solved" ]]; then printf 'Completed with walkthrough. '
-                    else printf 'Completed independently. '; fi
-                    printf 'Progress saved.\n'
+                    show_completion "$solved"
                     record_independent_replay "$solved"
-                    lesson_heading "What you practiced"
-                    lesson_text "$solved" debrief
                     prepare_active_lesson_if_missing
                     if (( current > total )); then
                         show_current
                         printf '\nType menu to return to the main menu.\n'
                     elif in_lesson_terminal; then
+                        printf '\nUp next · %02d  %s\n' "$(challenge_position "$current")" "${lesson_titles[current]}"
                         notify_lesson_terminal next
                     else
                         show_current
@@ -1116,12 +1273,13 @@ main() {
     esac
 }
 
-previous_course_order=(1 2 6 19 20 21 22 23 24 25 26 3 4 18 7 8 9 10 12 11 13 14 15 16 17 5 27 28 29 30)
-course_order=(1 2 6 19 20 21 22 23 24 31 25 26 3 4 18 7 8 9 10 12 11 13 14 15 16 17 5 32 33 34 35 36 27 29 30 28 37 38 39 40)
+previous_course_order=(1 2 6 19 20 21 22 23 24 25 26 3 4 18 41 7 8 9 10 12 11 13 14 15 16 17 5 27 28 29 30)
+course_order=(1 2 6 19 20 21 22 23 24 31 25 26 3 4 18 41 7 8 9 10 12 11 13 14 15 16 17 5 32 33 34 35 36 27 29 30 28 37 38 39 40)
 total=${#course_order[@]}
-version=44
+version=52
 puzzle_start_id=27
 lesson_titles=(
+    [41]="Fetch the relay system label"
     [1]='Find your bearings'
     [2]='Find the hidden note'
     [3]='Follow the ticket'
@@ -1164,7 +1322,61 @@ lesson_titles=(
     [40]='The shipment that will not import'
 )
 sections=('Navigation and file basics' 'Shell output and text processing' 'Searching and inspecting files' 'Permissions, links and shell tools' 'System and network inspection' 'Scan analysis and shell scripting' 'Dispatch puzzles')
-section_starts=(1 8 13 16 22 27 33 41)
+section_starts=(1 8 13 17 23 28 34 42)
+
+section_index() {
+    local index
+    for index in "${!sections[@]}"; do
+        if (( $1 < section_starts[index+1] )); then printf '%d' "$index"; return; fi
+    done
+}
+
+guided_receipts=(
+    [41]="Saved an exact copy of the system label from a local URL."
+    [1]='Recovered the supply note from its directory.'
+    [2]='Read the handoff inside the hidden dispatch directory.'
+    [3]='Identified the flag on the requested ticket.'
+    [4]='Recovered the receipt inside the layered shipment.'
+    [5]='Reported the first qualifying parcel and the distinct count.'
+    [6]='Identified both options and counted the matching warning lines.'
+    [7]='Restored owner read access and recovered the note.'
+    [8]='Built a symbolic link and a hard link to the requested file.'
+    [9]='Saved the correct status under BAY-07.'
+    [10]='Submitted the dispatch from inside sh.'
+    [11]='Recorded the public key fingerprint in fingerprint.txt.'
+    [12]='Identified the live timer by PID.'
+    [13]='Recorded the kernel release and machine architecture.'
+    [14]='Identified the filesystem and the largest parcel directory.'
+    [15]='Recorded the loopback interface and its IPv4 prefix.'
+    [16]='Identified the port of the loopback-only listener.'
+    [17]='Matched the latest dispatch warning to its ticket.'
+    [18]='Identified the gzip parcel and recovered its contents.'
+    [19]='Created staging/arrival.txt as an empty file.'
+    [20]='Backed up the manifest and renamed the draft.'
+    [21]='Cleared the scratch directory and preserved keep.txt.'
+    [22]='Copied the matching route sheets and preserved the originals.'
+    [23]='Wrote the opening line and appended the parcel receipt.'
+    [24]='reception.txt contains the normal status.
+  ✓ problems.txt contains the error message.'
+    [25]='Identified the parcel whose status changed.'
+    [26]='Listed the adjacent duplicate groups in scan order.'
+    [31]='Formatted the route labels and zero-padded parcel IDs.'
+    [32]='Printed labels correctly for the tested dock and parcel arguments.'
+    [33]='Made the expected decisions for the tested statuses and counts.'
+    [34]='Kept queue arguments in order, including labels with spaces.'
+    [35]='Filtered incoming records and wrote the matching IDs.'
+    [36]='Reported the final qualifying parcel states from the test input.'
+)
+
+section_skills=(
+    'Navigate the depot, manage files and select route sheets by name.'
+    'Route output and errors, format labels and compare records.'
+    'Search log trees and recover records from compressed parcels.'
+    'Manage file access, links, editors, processes and key fingerprints.'
+    'Inspect the host, storage, network interfaces and service logs.'
+    'Turn field comparisons, conditions and loops into repeatable reports.'
+    'Reconstruct handoffs, audit permissions and repair damaged records.'
+)
 
 challenge_position() {
     local position
@@ -1258,7 +1470,7 @@ prepare_active_lesson_if_missing() (
 refresh_search_fixtures() {
     local marker="$state_dir/.expanded-search-fixtures" challenge destination
     [[ -e "$marker" ]] && return 0
-    for challenge in 2 3 9 14 17 18 22 25 26; do
+    for challenge in 3 9 14 17 18 22 25 26; do
         destination=$(folder "$challenge")
         [[ -f "$destination/README.txt" ]] || continue
         case "$challenge" in
@@ -1266,7 +1478,7 @@ refresh_search_fixtures() {
             *) expand_search_fixture "$challenge" "$destination" ;;
         esac
         case "$challenge" in
-            2|14|17|22) write_intro "$challenge" "$destination" ;;
+            14|17|22) write_intro "$challenge" "$destination" ;;
         esac
     done
     touch -- "$marker"
@@ -1274,12 +1486,28 @@ refresh_search_fixtures() {
 
 refresh_lesson_prompts() {
     local lesson lesson_dir
-    if [[ ! -e "$state_dir/.submission-prompts-v44" ]]; then
+    if [[ ! -e "$state_dir/.lesson-prompts-v52" ]]; then
         for lesson in "${course_order[@]}"; do
             lesson_dir=$(folder "$lesson")
             if [[ -f "$lesson_dir/README.txt" ]]; then write_intro "$lesson" "$lesson_dir"; fi
         done
-        touch -- "$state_dir/.submission-prompts-v44"
+        touch -- "$state_dir/.lesson-prompts-v52"
+    fi
+    if [[ ! -e "$state_dir/.hidden-note-v45" ]]; then
+        lesson_dir=$(folder 2)
+        local dispatch="$lesson_dir/.dispatch" sample old_note
+        if [[ -d "$dispatch" && ! -L "$dispatch" && ! -L "$lesson_dir" && ! -L "${lesson_dir%/*}" ]]; then
+            add_dispatch_notes "$dispatch"
+            for (( sample=1; sample<=64; sample++ )); do
+                printf -v old_note '%s/handoff-%02d.txt' "$dispatch" "$sample"
+                if [[ -f "$old_note" && ! -L "$old_note" ]] &&
+                   cmp -s -- "$old_note" <(printf 'Routine dispatch handoff %02d\n' "$sample"); then
+                    rm -- "$old_note"
+                fi
+            done
+            write_intro 2 "$lesson_dir"
+        fi
+        touch -- "$state_dir/.hidden-note-v45"
     fi
     local marker="$state_dir/.lesson-prompts-v31" challenge destination
     [[ -e "$marker" ]] && return 0
@@ -1401,7 +1629,6 @@ submission_instructions() {
 expand_search_fixture() {
     local destination=$2
     case "$1" in
-        2) add_hidden_note_samples "$destination" ;;
         3) add_ticket_search_samples "$destination" ;;
         9) add_bay_search_samples "$destination" ;;
         14) add_storage_samples "$destination" ;;
@@ -1428,6 +1655,7 @@ prepare() {
         2)
             mkdir -p "$destination/.dispatch"
             printf '%s\n' "$(flag 2)" > "$destination/.dispatch/morning-dispatch-for-the-training-crew.txt"
+            add_dispatch_notes "$destination/.dispatch"
             ;;
         3) write_log_challenge "$destination" ;;
         4) write_archive_challenge "$destination" ;;
@@ -1508,6 +1736,11 @@ check_practice() {
     local destination
     destination=$(folder "$1")
     case "$1" in
+        41)
+            local report="$destination/relay-label.txt"
+            [[ -f "$report" && ! -L "$report" && ! "$report" -ef /etc/os-release ]] &&
+                cmp -s -- /etc/os-release "$report" ||
+                fail 'Use curl -o to save a separate copy of the full system label in relay-label.txt.' ;;
         7)
             local mode
             mode=$(stat -c %a -- "$destination/delivery-note.txt")
@@ -1710,13 +1943,18 @@ check_bash_output() {
     check_script_output "$script" "$expected" bash --noprofile --norc "./${script##*/}" "$@"
 }
 
-add_hidden_note_samples() {
-    local destination=$1 sample name
-    mkdir -p "$destination/.dispatch"
-    for (( sample=1; sample<=64; sample++ )); do
-        printf -v name 'handoff-%02d.txt' "$sample"
-        printf 'Routine dispatch handoff %02d\n' "$sample" > "$destination/.dispatch/$name"
-    done
+add_dispatch_notes() {
+    local directory=$1 name note
+    while IFS='|' read -r name note; do
+        if [[ ! -e "$directory/$name" && ! -L "$directory/$name" ]]; then
+            printf '%s\n' "$note" > "$directory/$name"
+        fi
+    done <<'NOTES'
+dock-map.txt|Deliveries use the east entrance.
+inventory.txt|Six crates are ready for pickup.
+shift-roster.txt|The loading crew starts at seven.
+weather-report.txt|Clear skies at the depot.
+NOTES
 }
 
 write_log_challenge() {
@@ -1830,7 +2068,8 @@ add_bay_search_samples() {
 check_key_practice() {
     local destination=$1 public_key key_type details bits fingerprint
     public_key="$destination/training-key.pub"
-    [[ -s "$destination/training-key" && -s "$public_key" ]] ||
+    [[ -f "$destination/training-key" && ! -L "$destination/training-key" && -s "$destination/training-key" &&
+       -f "$public_key" && ! -L "$public_key" && -s "$public_key" ]] ||
         fail 'Create the training-key pair in this challenge folder first.'
     read -r key_type _ < "$public_key" ||
         fail 'Check that training-key.pub contains your public key.'
@@ -2276,10 +2515,43 @@ check_access_modes() {
 
 lesson_text() {
     case "$1:$2" in
+        41:intro) cat <<'PROMPT' ;;
+Fetch the relay system label
+
+Your task
+The relay desk needs a copy of this machine's Linux distribution label.
+Use curl to retrieve it and save it as relay-label.txt in the lesson folder.
+
+Try this
+  curl file:///etc/os-release
+
+curl transfers data from a URL. With an https:// URL it can fetch data
+from a web server. Here file:// tells it to read a local file, so this
+exercise works offline. The final slash begins the path /etc/os-release.
+Look for the distribution name in the text curl prints.
+
+Run it again with -o and a filename to save the same data:
+
+  curl -o relay-label.txt file:///etc/os-release
+  cat relay-label.txt
+
+Suggested commands
+  curl  cat
+PROMPT
+        41:hint) printf 'Put the output filename directly after -o. Keep all three slashes in the local URL.\n' ;;
+        41:answer) cat <<'ANSWER' ;;
+  curl -o relay-label.txt file:///etc/os-release
+  cat relay-label.txt
+ANSWER
+        41:debrief) printf 'curl displays the retrieved data on standard output by default. With -o it writes that data to the file you name.\n' ;;
         1:intro) cat <<'PROMPT' ;;
 Find your bearings
 
-The supply crew left you a note. You start in the lesson folder.
+Your task
+Neon Harbor’s rooftop relays keep its night couriers connected. Your
+first shift starts with a supply note. Open it and recover the flag.
+
+Try this
 Type each command at the prompt and press Enter.
 
 1. Type ls to list the files and folders here. Look for supplies.
@@ -2304,10 +2576,30 @@ ANSWER
         2:intro) cat <<'PROMPT' ;;
 Find the hidden note
 
-The dispatcher tucked the morning handoff note in a hidden
-directory. Find that directory, then start typing the note's name
-in your command and press Tab to finish it. Read the note and
-submit the flag.
+Your task
+The rooftop relay crew left the morning handoff in a hidden directory.
+
+Try this
+Start by typing ls --help. Near the top, look for this line:
+
+  Usage: ls [OPTION]... [FILE]...
+
+ls is the command. Brackets mark optional parts you can leave out.
+The dots mean you can supply more than one. Type the actual options
+and names in your command; the brackets and dots stay on the help page.
+
+Try ls on its own. With no path it lists your current directory.
+Now try ls -l . to see how the pieces fit: -l is an option for a long
+listing, and the dot is the path for your current directory.
+
+Back in ls --help, look for the option that includes entries starting
+with a dot. Use it to find the hidden directory, then enter it with cd.
+Run ls inside. Among the five files, look for the morning handoff.
+Type cat mor and press Tab to complete its name, then Enter to read it.
+
+Shell tip
+Press Up to recall an earlier command and Down to move forward again.
+You can edit the recalled line before pressing Enter.
 
 Suggested commands
   ls  cd  cat
@@ -2323,10 +2615,12 @@ ANSWER
         3:intro) cat <<'PROMPT' ;;
 Follow the ticket
 
-The dispatch team left a flag on ticket TICKET-1042. Search the .log
-files under records and submit the flag on that ticket's line. Other
-tickets may have flags of their own.
+Your task
+A relay under the maglev line logged a flag on ticket TICKET-1042.
+Search the .log files under records and submit the flag on that ticket's
+line. Other tickets may have flags of their own.
 
+Try this
 Start with find records -name '*.log'. The quotes let find apply the
 pattern inside each folder. Pick a returned path and run grep -n 'TICKET-'
 followed by that path to see matching lines and their line numbers.
@@ -2345,10 +2639,12 @@ ANSWER
         4:intro) cat <<'PROMPT' ;;
 Open the shipment
 
-Three files arrived from dispatch. Open routing.txt.gz to find the
-first handoff. Follow the notes until you can read the receipt and
-submit its flag.
+Your task
+Three files arrived by data ferry while the district mesh was down. Open
+routing.txt.gz to find the first handoff. Follow the notes until you can
+read the receipt and submit its flag.
 
+Try this
 For an archive named example.tar, tar -tf example.tar lists its members
 before you unpack it. Change t to x to extract them. In both commands,
 f means the next argument names the archive.
@@ -2371,11 +2667,13 @@ ANSWER
         5:intro) cat <<'PROMPT' ;;
 Reconcile the scans
 
-Dispatch scanned some parcels more than once. In scans.txt, keep
-only records whose zone is NORTH and whose status is READY.
-Find the alphabetically first parcel ID and count the distinct parcel
-IDs in those records.
+Your task
+The turnstile scanners logged some parcels more than once. In scans.txt,
+keep only records whose zone is NORTH and whose status is READY. Find
+the alphabetically first parcel ID and count the distinct parcel IDs in
+those records.
 
+Try this
 Try printf '%s\n' 'desk|OPEN' | awk -F '|' '{print $2}'. It prints OPEN.
 -F sets the field separator and $2 selects the second field. Read the
 header of scans.txt to see which fields you need.
@@ -2398,8 +2696,10 @@ ANSWER
         6:intro) cat <<'PROMPT' ;;
 Read the docs
 
-Dispatch needs the number of warning lines in dispatch.log.
+Your task
+The night dispatcher needs the number of warning lines in dispatch.log.
 
+Try this
 1. Read Bash's help for read (in Zsh, use bash -c 'help read').
    Find the short option that preserves literal backslashes.
 2. Use man grep or grep --help to find the short option that counts
@@ -2421,11 +2721,14 @@ ANSWER
         7:intro) cat <<'PROMPT' ;;
 Unlock the note
 
-Dispatch left you a note named delivery-note.txt. Check its owner,
-group, and permissions. The owner can write to it but needs read
-access too. Add read permission for the owner and leave the other
-permissions as they are. Then read the note and submit its flag.
+Your task
+The courier at the relay station left you a note named
+delivery-note.txt. Check its owner, group, and permissions. The owner
+can write to it but needs read access too. Add read permission for the
+owner and leave the other permissions as they are. Then read the note
+and submit its flag.
 
+Try this
 For example, chmod u+r schedule.txt gives the owner of schedule.txt
 read access. The u selects the owner, + adds permission, and r means
 read. Use that pattern with the note's filename.
@@ -2445,13 +2748,16 @@ ANSWER
         8:intro) cat <<'PROMPT' ;;
 Two ways to link
 
-Dispatch wants two names for the same route sheet, source.txt.
+Your task
+The station map and the street kiosk need two names for the same route
+sheet, source.txt.
 
 1. Make a symbolic link named shortcut that points to source.txt.
    Inspect the path stored in shortcut.
 2. Make a hard link named mirror to source.txt. Compare their inode
    numbers to see whether they refer to the same file.
 
+Try this
 The argument order is ln existing-file new-name. Add -s to create a
 symbolic link. Try readlink shortcut to see its stored path. In ls -i
 output, the number before each name is its inode. Compare source.txt and
@@ -2474,37 +2780,67 @@ ANSWER
         9:intro) cat <<'PROMPT' ;;
 Edit the shift notes
 
-Open shift-notes.txt in Vim and search for BAY-07. On the next line,
-change status=waiting to status=ready. Save the file and exit Vim.
-Press Esc, type /BAY-07, and press Enter to jump to the entry.
-Move to the status line and press i to edit. When the text looks
-right, press Esc, type :wq, and press Enter to write the file and quit.
+Your task
+The dock display takes its status from shift-notes.txt. Update it with
+Nano, Vim, or Neovim. Find BAY-07 and change the line immediately below
+it from status=waiting to status=ready.
 
-If Vim isn't installed, you can use Neovim.
+Try this
+Nano
+  Run nano shift-notes.txt. Use the search shortcut shown at the bottom
+  of the screen (for example, ^F means Ctrl+F). Type BAY-07 and press
+  Enter. Arrow down to the status line and edit it directly.
+  Press Ctrl+O, then Enter to save under the same name. Press Ctrl+X to exit.
+
+Vim or Neovim
+  Run vim shift-notes.txt or nvim shift-notes.txt. Press Esc, type
+  /BAY-07, and press Enter. Move to the status line and press i to edit.
+  When the text looks right, press Esc, type :wq, and press Enter.
 
 Suggested commands
-  vim  nvim
+  nano  vim  nvim
 PROMPT
-        9:hint) printf 'In Vim, searching and editing happen in different modes. Find the bay in Normal mode before changing its status.\n' ;;
+        9:hint) printf 'Search for BAY-07 to land on the bay heading. Its status is on the next line. In Nano the search shortcut is shown along the bottom; in Vim or Neovim press Esc and use /.\n' ;;
         9:answer) cat <<'ANSWER' ;;
-Open shift-notes.txt with vim or nvim. In Normal mode, type /BAY-07
-and press Enter. Press j to move down one line, then cc to replace
-that line. Type status=ready, press Esc, then type :wq and press Enter.
+In Nano, open nano shift-notes.txt. Use Search (called Where Is in some
+versions) to find BAY-07. Arrow down, move to the end of the status
+line, erase waiting, and type ready. Press Ctrl+O, Enter, then Ctrl+X.
+
+In Vim or Neovim, open shift-notes.txt, press Esc, type /BAY-07 and
+press Enter. Press j to move down one line, then cc to replace that
+line. Type status=ready, press Esc, then type :wq and press Enter.
 ANSWER
-        9:debrief) printf 'In Vim, / searches in Normal mode and i starts Insert mode. Esc returns to Normal mode. :wq saves and quits.\n' ;;
+        9:debrief) printf 'Searching for the bay heading takes you to the right record. Nano lets you edit it directly. In Vim and Neovim, i enters Insert mode and Esc returns to Normal mode.\n' ;;
         10:intro) cat <<'PROMPT' ;;
 Switch shells
 
-The next dispatch needs to come from sh. First, use ps to identify
-your current shell. Then start sh and check again. The shell variable
-$$ gives you the PID of the shell you're typing in. Look for how ps
-can display information about a single PID.
+Your task
+The old ferry terminal accepts dispatches from a shell named sh.
 
-Run bn submit while you're still in sh.
-Afterward, use exit to return to your usual lab shell.
+Try this
+1. At the lab prompt, run these commands one at a time:
+
+     echo "$SHELL"
+     ps -p "$$" -o comm=
+
+   The first command usually shows your login shell, such as /bin/bash.
+   The second shows the name of the shell running right now. The shell
+   replaces $$ with its process ID, and ps looks up that process.
+
+2. To enter sh, type this command by itself and press Enter:
+
+     sh
+
+   You're now typing in a new shell in the same directory. Its prompt
+   may look different. Run ps -p "$$" -o comm= again and look for sh.
+   Try echo "$SHELL" again too: sh inherits that value, so it can still
+   show the same login shell you saw earlier.
+
+3. At the sh prompt, run bn submit. Once your work is accepted, type
+   exit and press Enter to return to the lab shell.
 
 Suggested commands
-  ps  sh  cat  man
+  echo  ps  sh  exit
 PROMPT
         10:hint) printf 'The shell you start inside another shell gets its own PID. Compare the process information before and after the switch.\n' ;;
         10:answer) cat <<'ANSWER' ;;
@@ -2519,29 +2855,52 @@ ANSWER
         11:intro) cat <<'PROMPT' ;;
 Fingerprint a key
 
-Create an SSH key pair for this exercise. Run ssh-keygen and enter
-./training-key at the save prompt so both files stay in this folder.
+Your task
+Make a practice key for the relay operator and record its public
+fingerprint. Save the practice key in this challenge folder. The ~/.ssh
+directory is for your personal SSH keys.
 
-Identify the public key, then use ssh-keygen to display its
-fingerprint. Save just the SHA256:... token on one line in
-fingerprint.txt.
+Try this
+1. Run pwd to see where you are. If you are unsure, run bn current.
+   It gives you a cd command if you need to enter the challenge folder.
 
-The public key has a .pub suffix. For a key named example.pub,
-ssh-keygen -lf example.pub displays its fingerprint. The number before
-the SHA256 token is the key size.
+2. If training-key and training-key.pub already exist here, go to step 3.
+   Otherwise, type the whole command, including -f:
 
-Keep the private key in the lab folder. This task uses the fingerprint
-and runs entirely on your VM.
+     ssh-keygen -t ed25519 -f ./training-key
+
+   The -f option sets the filename up front. The ./ means "in this
+   directory." If asked to overwrite a file, answer n. For a new key,
+   the next prompt asks for a passphrase. For this
+   practice key, you can press Enter twice to leave the passphrase empty.
+
+   If you see "Enter file in which to save the key", press Ctrl+C and
+   start again with the full command above. Pressing Enter at that
+   filename prompt can accept a default path under ~/.ssh.
+
+3. Run ls -l ./training-key ./training-key.pub to check both files are
+   here. Keep training-key private. Display the public key fingerprint:
+
+     ssh-keygen -lf ./training-key.pub
+
+   The first number is the key size. Save only the SHA256:... token
+   in fingerprint.txt.
 
 Suggested commands
-  ssh-keygen  ls  man  vim  nvim  cat
+  pwd  ls  ssh-keygen  man
 PROMPT
-        11:hint) printf 'The public key usually has an extra filename extension. Look for fingerprinting in the key generator’s manual.\n' ;;
+        11:hint) printf 'From the challenge folder, use -f ./training-key when generating the key. Use the .pub file with ssh-keygen -l to display its fingerprint.\n' ;;
         11:answer) cat <<'ANSWER' ;;
-Run ssh-keygen and give ./training-key as the save path. If you
-already created the pair, use the existing files.
+Run bn current and enter the challenge folder if needed. If you already
+created the training key pair here, reuse it. Otherwise generate it with:
 
-  ssh-keygen -l -E sha256 -f training-key.pub
+  ssh-keygen -t ed25519 -f ./training-key
+
+If prompted to overwrite a file, answer n and inspect the existing files.
+If the program asks where to save the key, cancel with Ctrl+C and use the
+full command above. Once both files are in the challenge folder, run:
+
+  ssh-keygen -l -E sha256 -f ./training-key.pub
 
 Copy only the SHA256:... token from the output into fingerprint.txt.
 ANSWER
@@ -2549,11 +2908,14 @@ ANSWER
         12:intro) cat <<'PROMPT' ;;
 Find your own process
 
-From this challenge folder, start sleep for about two minutes.
-Put it in the background by ending its command with &. The shell
-shows a job number and a process ID (PID).
+Your task
+The rooftop antenna crew needs a live timer to identify. From this
+challenge folder, start sleep for about two minutes. Put it in the
+background by ending its command with &. The shell shows a job number
+and a process ID (PID).
 
 Use ps to inspect that PID. Save only the PID in process-id.txt.
+Try this
 If the shell prints [1] 4821, 1 is the job number and 4821 is the PID.
 Right after starting the timer, try ps -p "$!". The shell replaces $!
 with the PID of the background job you just started. Look for sleep.
@@ -2575,12 +2937,17 @@ ANSWER
         13:intro) cat <<'PROMPT' ;;
 Read the system label
 
-Dispatch needs two facts about this VM. Use uname to find the
-kernel release and the machine hardware name, also called the
-architecture.
+Your task
+The relay maintenance log needs two facts about this machine. Use uname
+to find the kernel release and the machine hardware name, also called
+the architecture.
 
 Write them in system-report.txt, one value per line. Put the kernel
 release first and the architecture second.
+
+Try this
+  uname --help
+Look for the options for kernel release and machine hardware name.
 
 Suggested commands
   uname  man  vim  nvim  cat
@@ -2596,10 +2963,13 @@ ANSWER
         14:intro) cat <<'PROMPT' ;;
 Weigh the parcels
 
-There are several parcel directories under parcels. Use df to identify
-the filesystem type that stores this challenge folder. Then use du
-to see which parcel directory uses the most disk space.
+Your task
+The dock terminal is short on storage. Its parcel directories are under
+parcels. Use df to identify the filesystem type that stores this
+challenge folder. Then use du to see which parcel directory uses the
+most disk space.
 
+Try this
 Try df -T . and look under Type. The dot means your current folder.
 Try du -sk parcels/* for one total per parcel in KiB. Compare the
 numbers in the first column.
@@ -2623,13 +2993,19 @@ ANSWER
         15:intro) cat <<'PROMPT' ;;
 Find the loopback
 
-Loopback lets a machine talk to itself. Use ip to inspect the VM's
-interfaces and find the IPv4 address for localhost. The address is
-shown with a slash and a prefix length, such as 192.0.2.4/24.
+Your task
+Before the relay goes online, check its local interface. Loopback lets a
+machine talk to itself. Use ip to inspect the VM's interfaces and find
+the IPv4 address for localhost. The address is shown with a slash and a
+prefix length, such as 192.0.2.4/24.
 
 In network-report.txt, put the loopback interface name on the first
 line. Put its IPv4 address, including the slash and prefix length,
 on the second line.
+
+Try this
+  ip -4 address show
+Look for the interface whose address has scope host.
 
 Suggested commands
   ip  man  vim  nvim  cat
@@ -2646,9 +3022,12 @@ ANSWER
         16:intro) cat <<'PROMPT' ;;
 See what's listening
 
-Read sockets.txt, a captured TCP socket listing. Which listening socket is
-bound only to IPv4 loopback? Submit its numeric local port directly.
+Your task
+Read sockets.txt, a TCP socket listing captured at the signal desk.
+Which listening socket is bound only to IPv4 loopback? Submit its
+numeric local port directly.
 
+Try this
 For example, a LISTEN row with local address 127.0.0.1:4321 accepts
 loopback connections on port 4321. A listener on 0.0.0.0:4321 accepts
 connections on all local IPv4 interfaces. Read the Local Address column
@@ -2668,15 +3047,26 @@ ANSWER
         17:intro) cat <<'PROMPT' ;;
 Find the latest dispatch warning
 
-Inspect the last 60 entries in logs/dispatch.log. Find the newest
-entry with level WARN from the dispatch service. The window also
-contains warnings from other services and flags on unrelated entries.
+Your task
+The station just handed over the night shift. Inspect the last 60
+entries in logs/dispatch.log. Find the newest entry with level WARN from
+the dispatch service. The window also contains warnings from other
+services and flags on unrelated entries.
+
+Try this
+Start with a three-line preview. From the challenge folder, run:
+
+  cat logs/dispatch.log | tail -n 3
+
+cat reads the log. The pipe (|) sends its lines to tail, and -n 3 tells
+tail to print the last three lines in their original order. Change 3
+to 60 to see the part of the log you need to search.
 
 Write just the matching ticket ID, including the TICKET- prefix,
 in latest-ticket.txt. Submit the flag on that same line.
 
 Suggested commands
-  tail  grep  man  vim  nvim
+  cat  tail  grep  man  vim  nvim
 PROMPT
         17:hint) printf 'Check how to change how many entries you see at the end of the log. Match both the level and the service before comparing timestamps.\n' ;;
         17:answer)
@@ -2691,14 +3081,19 @@ ANSWER
         18:intro) cat <<'PROMPT' ;;
 Identify the mystery parcel
 
-The parcels share the .dat extension. Use file to find the
-one that contains gzip-compressed data. Write its original filename,
-including .dat, in parcel-name.txt.
+Your task
+The night ferry delivered a crate of data parcels, all labeled .dat. Use
+file to find the one that contains gzip-compressed data. Write its
+original filename, including .dat, in parcel-name.txt.
 
 Read the contents of the gzip parcel and submit its flag. If gunzip
 reports an unknown suffix, copy the compressed parcel to a name ending
 in .gz and run gunzip on that copy. Keep the original .dat name for
 your report.
+
+Try this
+  file parcel-*.dat
+Read the format printed next to each filename.
 
 Suggested commands
   file  gzip  gunzip  man  vim  nvim
@@ -2719,8 +3114,14 @@ ANSWER
         19:intro) cat <<'PROMPT' ;;
 Set up the staging area
 
-Dispatch needs a staging area. Create a directory named staging.
-Inside it, create an empty file called arrival.txt.
+Your task
+The drone dock needs a staging area for its first arrival. Create a
+directory named staging. Inside it, create an empty file called
+arrival.txt.
+
+Try this
+  mkdir staging
+Use ls to check the directory appeared before creating the file inside it.
 
 Suggested commands
   mkdir  touch  ls  cat
@@ -2735,8 +3136,14 @@ ANSWER
         20:intro) cat <<'PROMPT' ;;
 Copy and rename a manifest
 
-Make a copy of manifest.txt named backup.txt. Leave manifest.txt
-in place. Then rename draft.txt to ready.txt in this folder.
+Your task
+Before the courier kiosk opens, make a copy of manifest.txt named
+backup.txt. Leave manifest.txt in place. Then rename draft.txt to
+ready.txt in this folder.
+
+Try this
+  ls
+Identify the two input files before you copy or rename either one.
 
 Suggested commands
   cp  mv  ls  cat
@@ -2750,8 +3157,14 @@ ANSWER
         21:intro) cat <<'PROMPT' ;;
 Clear the scratch space
 
-Remove the two practice files inside scratch. Once the directory
-is empty, remove it too. Leave keep.txt in the challenge folder.
+Your task
+Clear the route printer’s scratch space. Remove the two practice files
+inside scratch. Once the directory is empty, remove it too. Leave
+keep.txt in the challenge folder.
+
+Try this
+  ls scratch
+Read the names inside the directory before you remove them.
 
 Suggested commands
   rm  rmdir  ls  cat
@@ -2766,10 +3179,12 @@ ANSWER
         22:intro) cat <<'PROMPT' ;;
 Select the route sheets
 
-The directory delivery batch contains several files. Copy every
-file whose name starts with route and ends in .txt into selected.
-Keep the original files in place.
+Your task
+The courier kiosk stores its outgoing files in the directory delivery
+batch. Copy every file whose name starts with route and ends in .txt
+into selected. Keep the original files in place.
 
+Try this
 Try ls 'delivery batch'/*.txt. The quotes keep the folder name together.
 The * sits outside the quotes so the shell can expand it into filenames.
 Narrow the pattern until ls shows only the sheets you want, then copy them.
@@ -2789,17 +3204,20 @@ ANSWER
         23:intro) cat <<'PROMPT' ;;
 Write and append a report
 
-Try these commands with a practice file:
+Your task
+The night shift needs a two-line report for the dock terminal. Use
+printf and shell redirection to write Shift opened as the first line of
+shift-report.txt. Run a second command to append Parcel received on the
+next line.
+
+Try this
+With a practice file, run:
   printf '%s\n' 'Truck arrived' > practice.txt
   printf '%s\n' 'Gate closed' >> practice.txt
   cat practice.txt
 
 %s prints the supplied text and \n ends the line. The shell's > creates
 or replaces the file. >> adds to the end, keeping the first line.
-
-Use printf and shell redirection to write Shift opened as the
-first line of shift-report.txt. Run a second command to append
-Parcel received on the next line.
 
 Check that the report contains both lines in order.
 
@@ -2816,6 +3234,11 @@ ANSWER
         24:intro) cat <<'PROMPT' ;;
 Separate output and errors
 
+Your task
+The drone gate sends arrivals and scanner faults to the same terminal.
+Save normal output in reception.txt and errors in problems.txt.
+
+Try this
 Run chmod u+x check-in.sh to give yourself permission to run the script.
 Here u means the file's owner, + adds a permission, and x means execute.
 You can now run it as ./check-in.sh from this folder.
@@ -2830,8 +3253,7 @@ ls lists the existing file on stdout. The pipe sends that list to tee,
 which shows it and saves it in listed.txt. The shell sends the error
 about the missing file to errors-example.txt. Use cat to compare them.
 
-Save the error in problems.txt. Use tee to save the normal status
-in reception.txt and still see it on your terminal.
+Apply this to ./check-in.sh. Keep its normal status visible as tee saves it.
 
 Suggested commands
   chmod  tee  cat  ls
@@ -2849,10 +3271,21 @@ ANSWER
         25:intro) cat <<'PROMPT' ;;
 Compare the manifests
 
-Compare yesterday.txt and today.txt. One parcel's status changed.
-Try diff -u yesterday.txt today.txt. Below the headers, a line starting
-with - shows the old record and + shows the new one. Read the parcel ID
-on that pair and write just the ID in changed-parcel.txt.
+Your task
+Compare the night ferry manifests yesterday.txt and today.txt. One
+parcel's status changed.
+
+Try this
+Try diff -u yesterday.txt today.txt.
+Below the headers, a line starting with - shows the old record and +
+shows the new one. Read the parcel ID on that pair and write just the ID
+in changed-parcel.txt.
+
+Shell tip
+Try this at the interactive lab prompt: run pwd, then type !! and press
+Enter to repeat pwd. Run history to see numbered commands. If pwd is
+entry 12, type !12 to run it again. Use the number from your own list:
+!n runs the entire command at entry n, including any redirections.
 
 Suggested commands
   diff  cat  vim  nvim
@@ -2868,10 +3301,13 @@ ANSWER
         26:intro) cat <<'PROMPT' ;;
 Find repeated scans
 
-Some IDs in scans.txt appear on consecutive lines. Write one copy
-of each repeated group to duplicate-ids.txt, in the order they
-appear. Count neighboring repeats only.
+Your task
+The east gate scanner sometimes reads a badge twice. Some IDs in
+scans.txt appear on consecutive lines. Write one copy of each repeated
+group to duplicate-ids.txt, in the order they appear. Count neighboring
+repeats only.
 
+Try this
 Try printf '%s\n' A A B A | uniq -d. It prints A once because the first
 two lines match. The last A stands alone. Keep the scan file in its
 original order so neighboring still means what it did at the scanner.
@@ -2890,8 +3326,9 @@ ANSWER
         27:intro) cat <<'PROMPT' ;;
 Rebuild the dispatch packet
 
-The night shift needs two route sheets. The approval log in records
-lists decisions for both shifts. Find the revisions approved for
+Your task
+Neon Harbor’s night couriers need two route sheets. The approval log in
+records lists decisions for both shifts. Find the revisions approved for
 NIGHT and locate those sheets under warehouse.
 
 Create a handoff directory with these three files.
@@ -2923,9 +3360,11 @@ ANSWER
         28:intro) cat <<'PROMPT' ;;
 Audit the unresolved holds
 
-Audit events.log for dock EAST. Each row records a status change.
-Rows are in time order, oldest first. A ticket's last row gives
-its current status. EAST-ANNEX is a separate dock.
+Your task
+The east dock signal board is being rebuilt from its log. Audit
+events.log for dock EAST. Each row records a status change. Rows are in
+time order, oldest first. A ticket's last row gives its current status.
+EAST-ANNEX is a separate dock.
 
 Optional documentation practice: look up stable sort in info coreutils
 or sort --help. Try sort -s -t '|' -k3,3 events.log and inspect a ticket
@@ -2946,9 +3385,10 @@ ANSWER
         29:intro) cat <<'PROMPT' ;;
 Reconcile the intake
 
-Compare plan.txt, the expected inventory, with intake.txt, the
-received scans. Audit only the SOUTH zone. SOUTH-ANNEX is a
-separate zone. Repeated scans count as one crate.
+Your task
+The ferry has unloaded. Compare plan.txt, the expected inventory, with
+intake.txt, the received scans. Audit only the SOUTH zone. SOUTH-ANNEX
+is a separate zone. Repeated scans count as one crate.
 
 Put the IDs of expected crates with no scan in missing.txt.
 Put the IDs of scanned crates absent from the plan in extra.txt.
@@ -2969,9 +3409,11 @@ ANSWER
         30:intro) cat <<'PROMPT' ;;
 Recover the verified handoff
 
-Several shifts left notes in recovery.tar.gz. Find the handoff
-note for BATCH-044 whose state is VERIFIED. Notes for the same
-batch can have other states.
+Your task
+The district mesh is dark. A relay archive survived the power cut.
+Several shifts left notes in recovery.tar.gz. Find the handoff note for
+BATCH-044 whose state is VERIFIED. Notes for the same batch can have
+other states.
 
 Copy the verified note into recovery/verified-note.txt. In
 recovery/summary.txt, record its dock code on the first line and
@@ -2992,8 +3434,10 @@ ANSWER
         31:intro) cat <<'PROMPT' ;;
 Print the dispatch labels
 
-Use one printf command with a format string and three arguments to
-write these names to labels.txt, one per line, in this order.
+Your task
+The dock printer needs route and parcel labels. Use one printf command
+with a format string and three arguments to write these names to
+labels.txt, one per line, in this order.
 
   north-route.txt
   west-route.txt
@@ -3003,6 +3447,7 @@ Then use printf to write BOX-007, BOX-024, and BOX-105 to boxes.txt,
 one per line. Give printf the numbers 7, 24, and 105 as arguments
 and use the format string to add the zero padding.
 
+Try this
 For example, printf '%s\n' alpha beta prints each word on its own
 line because printf reuses the format for the extra argument.
 Try printf 'BAY-%03d\n' 4 12. It prints BAY-004 and BAY-012 on separate
@@ -3021,11 +3466,14 @@ ANSWER
         32:intro) cat <<'PROMPT' ;;
 Pass arguments to a script
 
-Create label.sh for Bash. It takes a dock as its first argument
-and a parcel ID as its second. Print a single line in this form.
+Your task
+The parcel kiosk needs a Bash script named label.sh. It takes a dock as
+its first argument and a parcel ID as its second. Print a single line in
+this form.
 
   EAST: BOX-042
 
+Try this
 In a script, $1 and $2 refer to the first and second arguments.
 Quote their expansions so a value with spaces stays together.
 
@@ -3065,14 +3513,16 @@ ANSWER
         33:intro) cat <<'PROMPT' ;;
 Make a dispatch decision
 
-Create a Bash script named decision.sh. It receives a status and
-a pallet count. Use the rules below to print exactly one word.
+Your task
+The pallet gate needs a Bash script named decision.sh. It receives a
+status and a pallet count. Use the rules below to print exactly one
+word.
 
   HOLD, with any count                   REVIEW
   READY, with at least 10 pallets         LOAD
   Anything else                          WAIT
 
-Example Bash script
+Try this
 
 This example is about staffing a desk. Use it as a model for the
 structure of decision.sh, then apply the dispatch rules above.
@@ -3120,10 +3570,13 @@ ANSWER
         34:intro) cat <<'PROMPT' ;;
 Loop over the queue
 
-Write a Bash script named queue.sh that accepts any number of
-route labels. Print one line per argument, with Queued: before
-the label. Keep the original order. Labels may contain spaces.
+Your task
+The courier queue on the station’s light wall needs a Bash script named
+queue.sh that accepts any number of route labels. Print one line per
+argument, with Queued: before the label. Keep the original order. Labels
+may contain spaces.
 
+Try this
 Try bash queue.sh east "west gate". It should print the two lines below.
   Queued: east
   Queued: west gate
@@ -3146,13 +3599,14 @@ ANSWER
         35:intro) cat <<'PROMPT' ;;
 Read from a pipeline
 
-Create ready.sh. It receives lines on standard input. Each line
-has three fields separated by |, with the dock first, then the
-status, then the ID.
-Print the ID when the dock is exactly EAST and the status is
-exactly READY. Keep the input order and preserve repeated matches.
+Your task
+Build ready.sh for the east dock’s incoming feed. It receives lines on
+standard input. Each line has three fields separated by |, with the dock
+first, then the status, then the ID. Print the ID when the dock is
+exactly EAST and the status is exactly READY. Keep the input order and
+preserve repeated matches.
 
-Try a small example at the shell prompt
+Try this
 
   printf '%s\n' 'front desk|Box\A' 'west gate|Box B' |
   while IFS='|' read -r location label; do
@@ -3223,12 +3677,14 @@ ANSWER
         36:intro) cat <<'PROMPT' ;;
 Remember the last status
 
-Write states.awk for use with updates.txt. Each row has a parcel
-ID and a status separated by |, oldest to newest. Print one row
-for each parcel whose final status is HOLD or WAIT. Use the same
-ID|STATUS format. The rows can be in any order.
+Your task
+The night dispatcher needs the last known state of each parcel. Write
+states.awk for use with updates.txt. Each row has a parcel ID and a
+status separated by |, oldest to newest. Print one row for each parcel
+whose final status is HOLD or WAIT. Use the same ID|STATUS format. The
+rows can be in any order.
 
-Practice example
+Try this
 
 Save these three rows in example.txt.
 
@@ -3301,7 +3757,8 @@ ANSWER
         37:intro) cat <<'PROMPT' ;;
 Build the dispatch timeline
 
-Two scanners recorded the same shift in separate logs under scans.
+Your task
+Two dock scanners recorded the night shift in separate logs under scans.
 The rows contain a time, dock, event, and ticket ID, separated by |.
 
 Build timeline.txt from both logs. Keep events for dock WEST with
@@ -3323,10 +3780,13 @@ ANSWER
         39:intro) cat <<'PROMPT' ;;
 Audit the overnight permission changes
 
-Two tools gained set-user-ID (SUID) overnight. Review the fictional inventory
-snapshots yesterday.txt and today.txt (path|owner|mode). A leading 4 in
-these four-digit modes marks SUID. Compare by path and consult tickets.txt
-(ticket|decision|path|requested mode). Only APPROVED tickets authorize changes.
+Your task
+Two tools on the fictional dispatch terminal gained set-user-ID (SUID)
+overnight. Review the fictional inventory snapshots yesterday.txt and
+today.txt (path|owner|mode). A leading 4 in these four-digit modes marks
+SUID. Compare by path and consult tickets.txt
+(ticket|decision|path|requested mode). Only APPROVED tickets authorize
+changes.
 
 Write audit.txt with two lines, using the literal labels shown here:
   INVESTIGATE|path|previous mode|new mode
@@ -3349,10 +3809,12 @@ ANSWER
         40:intro) cat <<'PROMPT' ;;
 The shipment that will not import
 
-Start with import.log. Compare rejected.txt with the small accepted sample
-example.txt. The importer requires LF after every record, including the
-last. Parcel IDs have the form PK- followed by four digits. Destination
-names are exact, including repeated spaces.
+Your task
+The ferry manifest looks fine on screen, but the kiosk rejected it.
+Start with import.log. Compare rejected.txt with the small accepted
+sample example.txt. The importer requires LF after every record,
+including the last. Parcel IDs have the form PK- followed by four
+digits. Destination names are exact, including repeated spaces.
 
 Produce repaired.txt from rejected.txt. Keep the header, record order,
 destinations and original input intact. Use bn check, then bn submit.
@@ -3366,8 +3828,9 @@ ANSWER
         38:intro) cat <<'PROMPT' ;;
 Apply the approved access
 
-Dispatch has logged permission requests for 64 route files. Your job
-is to apply the approved night-shift requests to the actual files.
+Your task
+The courier mesh has logged permission requests for 64 route files. Your
+job is to apply the approved night-shift requests to the actual files.
 
 1. Find the requests to apply.
 
@@ -3549,19 +4012,22 @@ check_puzzle_objective() {
 }
 
 grade_puzzle() {
+    local -a results=()
     local directory index feedback passed=0 key before=$earned
     directory=$(folder "$current")
     for index in "${!objectives[@]}"; do
         key="$current.$((index+1))"
         if feedback=$(check_puzzle_objective "$current" "$((index+1))" "$directory" 2>&1); then
-            printf '  [x] %s\n' "${objectives[index]}"
+            results+=("  [x] ${objectives[index]}")
             passed=$((passed + 1))
             if [[ "$earned" != *",$key,"* ]]; then earned+="$key,"; fi
         else
-            printf '  [ ] %s — %s\n' "${objectives[index]}" "$feedback"
+            results+=("  [ ] ${objectives[index]} — $feedback")
         fi
     done
     if [[ "$before" != "$earned" ]]; then save_state; fi
+    if [[ ${1:-} == submit ]] && (( passed == ${#objectives[@]} )); then return 0; fi
+    printf '%s\n' "${results[@]}"
     printf '%d/%d objectives currently met.\n' "$passed" "${#objectives[@]}"
     (( passed == ${#objectives[@]} ))
 }
@@ -3624,7 +4090,8 @@ show_stats() {
             fi
         fi
     fi
-    local hints='' answers='' entry
+    local hints='' answers='' entry used badge pick
+    local -a review_labels=() review_positions=()
     solved=$(solved_count)
     limit=$((total-first_challenge+1))
     elapsed=$(elapsed_seconds)
@@ -3638,9 +4105,21 @@ show_stats() {
 
     for ((position=first_challenge; position<=total; position++)); do
         id=${course_order[position-1]}
-        printf -v entry '%02d  %s\n' "$position" "${lesson_titles[id]}"
-        if [[ -f "$state_dir/.hint-$id" ]]; then hints+="$entry"; fi
-        if [[ -f "$state_dir/.answer-$id" ]]; then answers+="$entry"; fi
+        badge='' used=''
+        if [[ "$reassessed" == *",$id,"* ]]; then badge='  ✓ Replayed independently'; fi
+        printf -v entry '%02d  %s%s' "$position" "${lesson_titles[id]}" "$badge"
+        if [[ -f "$state_dir/.hint-$id" ]]; then
+            hints+="$entry"$'\n'
+            used='Hint'
+        fi
+        if [[ -f "$state_dir/.answer-$id" ]]; then
+            answers+="$entry"$'\n'
+            used="${used:+$used + }Walkthrough"
+        fi
+        if [[ -n "$used" ]]; then
+            review_labels+=("$entry  ·  $used")
+            review_positions+=("$position")
+        fi
         puzzle_objectives "$id"
         if (( ${#objectives[@]} == 0 )); then
             available=$((available+1))
@@ -3701,8 +4180,10 @@ show_stats() {
         arrow=$star
     fi
     printf '%s%s%s\n%s%s %s%s\n\n' "$pink" "$next_label" "$reset" "$gold" "$arrow" "$next_action" "$reset"
-    printf '%sHints used%s\n%s\n' "$sky" "$reset" "${hints:-None recorded.}"
-    printf '%sAnswers revealed%s\n%s\n' "$gold" "$reset" "${answers:-None recorded.}"
+    if [[ ${2:-} != review ]] || (( ! ${#review_labels[@]} )); then
+        printf '%sHints used%s\n%s\n' "$sky" "$reset" "${hints:-None recorded.}"
+        printf '%sAnswers revealed%s\n%s\n' "$gold" "$reset" "${answers:-None recorded.}"
+    fi
     printf 'Elapsed: %dh %02dm %02ds\nIncorrect submissions: %d (free retries)\n' \
         "$((elapsed/3600))" "$((elapsed/60%60))" "$((elapsed%60))" "$mistakes"
     if (( score )); then printf 'Previous scoring system: %d historical points\n' "$score"; fi
@@ -3711,16 +4192,39 @@ show_stats() {
         if [[ "$details" == --details || ! -t 1 ]]; then printf '\nPuzzle checklist\n%s' "$checklist"
         else printf 'Puzzle checklist: bn stats --details\n'; fi
     fi
+    if [[ ${2:-} == review ]]; then
+        if (( ${#review_labels[@]} )); then
+            menu_style=inline choose_row 'Review a lesson · Enter starts a separate practice attempt' "${review_labels[@]}" Back
+            printf '\n'
+            if (( pick < ${#review_positions[@]} )); then number=${review_positions[pick]}; fi
+        else
+            printf '\nPress Enter to return. '
+            IFS= read -r || :
+        fi
+    fi
 }
 
 # A separate practice run can certify a walkthrough completion. It never
 # advances the main run or changes its active lesson or working files.
 record_independent_replay() (
-    local id=$1 practice_earned=$earned key index
+    local id=$1 practice_earned=$earned
     [[ "$state_dir" != "$root" && ! -f "$state_dir/.answer-$id" ]] || return 0
+    local source_id
+    if [[ -f "$state_dir/.review-source" ]]; then
+        read -r source_id < "$state_dir/.review-source"
+        if valid_practice "$source_id"; then
+            (state_dir="$root/.practice.$source_id"; credit_replay "$id" "$practice_earned")
+        fi
+    fi
     state_dir=$root
+    credit_replay "$id" "$practice_earned"
+)
+
+credit_replay() {
+    local id=$1 practice_earned=$2 key index
     load_state
-    is_solved "$id" && [[ -f "$root/.answer-$id" ]] || return 0
+    is_solved "$id" || [[ "$current" == "$id" ]] || return 0
+    [[ -f "$state_dir/.answer-$id" || -f "$state_dir/.hint-$id" ]] || return 0
     [[ "$reassessed" != *",$id,"* ]] || return 0
     reassessed+="$id,"
     puzzle_objectives "$id"
@@ -3729,7 +4233,8 @@ record_independent_replay() (
         if [[ "$practice_earned" == *",$key,"* && "$earned" != *",$key,"* ]]; then earned+="$key,"; fi
     done
     save_state
-    printf 'Independent replay recorded for the main course.\n'
-)
+    if [[ "$state_dir" == "$root" ]]; then printf 'Independent replay recorded for the main course.\n'
+    else printf 'Independent replay recorded for the practice run.\n'; fi
+}
 
 main "$@"

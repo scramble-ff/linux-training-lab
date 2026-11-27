@@ -55,11 +55,11 @@ class LabTests(unittest.TestCase):
 
     def test_script_feedback(self):
         for number, name, body, expected in (
-            (28, "label.sh", 'printf "%s: %s\\n" "${1%% *}" "$2"', "West Gate: BOX-003"),
-            (29, "decision.sh", "echo wrong; exit 5", "Command exit status: 5"),
-            (30, "queue.sh", "echo wrong", "Queued: west gate"),
-            (31, "ready.sh", "echo wrong > ready-ids.txt", "Actual ready-ids.txt:\nwrong"),
-            (32, "states.awk", 'END {print "wrong"}', "Actual sorted output:\nwrong"),
+            (29, "label.sh", 'printf "%s: %s\\n" "${1%% *}" "$2"', "West Gate: BOX-003"),
+            (30, "decision.sh", "echo wrong; exit 5", "Command exit status: 5"),
+            (31, "queue.sh", "echo wrong", "Queued: west gate"),
+            (32, "ready.sh", "echo wrong > ready-ids.txt", "Actual ready-ids.txt:\nwrong"),
+            (33, "states.awk", 'END {print "wrong"}', "Actual sorted output:\nwrong"),
         ):
             with self.subTest(number=number):
                 self.runner("setup", "--jump", str(number))
@@ -74,8 +74,8 @@ class LabTests(unittest.TestCase):
                 self.runner("teardown")
 
     def test_final_lesson(self):
-        self.runner("setup", "--jump", "40")
-        folder = self.lesson(40)
+        self.runner("setup", "--jump", "41")
+        folder = self.lesson(41)
         original = (folder / "rejected.txt").read_bytes()
         clean = original.replace(b"\r\n", b"\n").replace(b"\t", b"")
         repaired = folder / "repaired.txt"
@@ -96,7 +96,7 @@ class LabTests(unittest.TestCase):
         (practice / "lessons/04/unfinished.txt").touch()
         menu = self.runner("setup")
         self.assertIn("Resume last practice", menu)
-        resumed = self.runner("setup", stdin="4\npwd\nexit\n")
+        resumed = self.runner("setup", stdin="5\npwd\nexit\n")
         self.assertIn(str(practice / "lessons/04"), resumed)
         self.assertTrue((practice / "lessons/04/unfinished.txt").is_file())
         self.runner("save")
@@ -111,18 +111,18 @@ class LabTests(unittest.TestCase):
         self.runner("teardown")
         self.assertEqual(set(self.home.iterdir()), {unrelated, self.home / "beginnix-progress.txt"})
         self.runner("setup", "--resume", str(self.home / "beginnix-progress.txt"))
-        self.assertIn("Solved: 0 / 40", self.runner("stats"))
+        self.assertIn("Solved: 0 / 41", self.runner("stats"))
 
     def test_puzzle_objectives_and_walkthroughs(self):
         self.runner("setup", "--puzzles")
         self.assertIn("0/8 puzzles completed", self.runner("setup"))
-        for number in range(33, 41):
+        for number in range(34, 42):
             with self.subTest(number=number):
                 folder = self.lesson(number)
                 self.assertFalse((folder / "dispatch.txt").exists())
                 before = self.runner("check", success=False)
                 self.assertIn("[ ]", before)
-                if number == 33:
+                if number == 34:
                     self.assertIn("[x] Preserve both warehouse originals", before)
                     self.runner("check", success=False)
                     self.assertIn("demonstrated: 1 / 19", self.runner("stats"))
@@ -131,7 +131,7 @@ class LabTests(unittest.TestCase):
                 subprocess.run(["bash", "-ec", example], cwd=folder, env=self.env,
                                capture_output=True, check=True)
                 self.assertIn("Ready.", self.runner("check"))
-                if number == 35:
+                if number == 36:
                     archive = folder / "recovery.tar.gz"
                     original = archive.read_bytes()
                     archive.write_bytes(b"damaged")
@@ -139,7 +139,10 @@ class LabTests(unittest.TestCase):
                     self.assertIn("[ ] Preserve archive integrity", feedback)
                     self.assertIn("[x] Recover the verified note", feedback)
                     archive.write_bytes(original)
-                self.assertIn("Completed with walkthrough", self.runner("submit"))
+                result = self.runner("submit")
+                self.assertIn("Completed with walkthrough", result)
+                if number == 41:
+                    self.assertIn("Section complete · Dispatch puzzles", result)
         self.assertIn("8/8 puzzles completed", self.runner("setup"))
         self.assertIn("demonstrated: 19 / 19", self.runner("stats"))
         self.runner("save")
@@ -148,8 +151,8 @@ class LabTests(unittest.TestCase):
         self.assertIn("demonstrated: 19 / 19", self.runner("stats"))
 
     def test_restart_preview_and_restore_partial_credit(self):
-        self.runner("setup", "--jump", "35")
-        folder = self.lesson(35)
+        self.runner("setup", "--jump", "36")
+        folder = self.lesson(36)
         (folder / "my-notes").write_text("keep this")
         preview = self.runner("restart")
         self.assertIn("restart --confirm", preview)
@@ -194,8 +197,8 @@ class LabTests(unittest.TestCase):
         self.assertIn("Answers revealed\n01  Find your bearings", stats)
 
     def test_upgrading_an_unfinished_archive_lesson(self):
-        self.runner("setup", "--jump", "35")
-        folder = self.lesson(35)
+        self.runner("setup", "--jump", "36")
+        folder = self.lesson(36)
         # Version 30 kept neither a checksum nor per-objective state.
         (folder / ".original.sha256").unlink()
         (folder / ".seeded-puzzle").unlink()
@@ -207,10 +210,46 @@ class LabTests(unittest.TestCase):
         self.runner("setup")
         self.assertEqual((folder / "my-note").read_text(), "unfinished")
         self.assertIn("older lesson has no original checksum", self.runner("check", success=False))
-        self.runner("restart", "--confirm", "35")
+        self.runner("restart", "--confirm", "36")
         self.assertIn("[x] Preserve archive integrity", self.runner("check", success=False))
         kept, = (self.root / "previous-attempts").glob("*/attempt/my-note")
         self.assertEqual(kept.read_text(), "unfinished")
+
+    def test_lesson_two_help_and_legacy_samples(self):
+        self.runner("setup", "--jump", "2")
+        dispatch = self.lesson(2) / ".dispatch"
+        names = {p.name for p in dispatch.iterdir()}
+        morning = "morning-dispatch-for-the-training-crew.txt"
+        self.assertEqual(names, {morning, "dock-map.txt", "inventory.txt",
+                                 "shift-roster.txt", "weather-report.txt"})
+        flag = (dispatch / morning).read_text().strip()
+        for text in ("ls --help", "Usage: ls [OPTION]... [FILE]...", "ls -l ."):
+            self.assertIn(text, (self.lesson(2) / "README.txt").read_text())
+
+        # Simulate an earlier install, including edits to a generated sample.
+        for name in names - {morning}:
+            (dispatch / name).unlink()
+        for n in range(1, 65):
+            (dispatch / f"handoff-{n:02}.txt").write_text(f"Routine dispatch handoff {n:02}\n")
+        (dispatch / "handoff-01.txt").write_text("my notes")
+        (dispatch / "inventory.txt").write_text("my inventory")
+        (self.root / ".hidden-note-v45").unlink()
+        (self.lesson(2) / "README.txt").write_text("older instructions")
+        self.assertIn("ls --help", self.runner("current"))
+        self.assertEqual({p.name for p in dispatch.iterdir()}, names | {"handoff-01.txt"})
+        self.assertEqual((dispatch / "handoff-01.txt").read_text(), "my notes")
+        self.assertEqual((dispatch / "inventory.txt").read_text(), "my inventory")
+        self.assertIn("Progress saved", self.runner("submit", flag))
+
+    def test_curl_relay_label(self):
+        self.runner("setup", "--jump", "16")
+        folder = self.lesson(16)
+        self.assertIn("curl file:///etc/os-release", self.runner("current"))
+        (folder / "relay-label.txt").write_text("partial label")
+        self.runner("check", success=False)
+        subprocess.run(["curl", "-o", "relay-label.txt", "file:///etc/os-release"],
+                       cwd=folder, env=self.env, check=True, capture_output=True)
+        self.assertIn("Challenge 17", self.runner("submit"))
 
     def test_guided_revisions(self):
         self.runner("setup", "--jump", "3")
@@ -219,8 +258,8 @@ class LabTests(unittest.TestCase):
         count = sum(line.startswith("WARN") for line in (self.lesson(3) / "dispatch.log").read_text().splitlines())
         self.runner("submit", "r", "c", str(count))
         self.runner("teardown")
-        self.runner("setup", "--jump", "25")
-        folder = self.lesson(25)
+        self.runner("setup", "--jump", "26")
+        folder = self.lesson(26)
         port = next(row.split()[3].split(":")[1] for row in (folder / "sockets.txt").read_text().splitlines()
                     if row.startswith("LISTEN") and row.split()[3].startswith("127.0.0.1"))
         self.assertIn("Numeric local port", self.runner("check"))
@@ -228,16 +267,16 @@ class LabTests(unittest.TestCase):
         self.runner("submit", port)
 
     def test_submission_by_finding_and_work(self):
-        self.runner("setup", "--jump", "27")
-        folder = self.lesson(27)
+        self.runner("setup", "--jump", "28")
+        folder = self.lesson(28)
         parcels = sorted({line.split("|")[3] for line in (folder / "scans.txt").read_text().splitlines()
                           if line.split("|")[1:3] == ["NORTH", "READY"]})
         self.runner("submit", stdin=f"{parcels[0]} {len(parcels)}\n")
-        folder = self.lesson(28)
+        folder = self.lesson(29)
         self.assertFalse((folder / "dispatch.txt").exists())
         self.assertIn("with no arguments", (folder / "README.txt").read_text())
         self.runner("submit", success=False)
-        self.assertIn("Challenge 28", self.runner("current"))
+        self.assertIn("Challenge 29", self.runner("current"))
 
     def test_neon_arcade_stats(self):
         self.runner("setup")
@@ -252,7 +291,7 @@ class LabTests(unittest.TestCase):
             self.runner("setup", "--resume", str(checkpoint))
 
         first_seven = ",27.1,27.2,27.3,29.1,29.2,30.1,30.2,"
-        checkpoint_for(34, order[34], first_seven)
+        checkpoint_for(35, order[35], first_seven)
         self.env.update(TERM="xterm-256color", LC_ALL="C.UTF-8")
         self.env.pop("NO_COLOR", None)
         def terminal_stats(columns=80, option=""):
@@ -263,7 +302,7 @@ class LabTests(unittest.TestCase):
             return result.stdout
 
         arcade = terminal_stats()
-        for item in ("✦ Player Stats ✦", "85%", "34 / 40", "Report dock and pallet count",
+        for item in ("✦ Player Stats ✦", "85%", "35 / 41", "Report dock and pallet count",
                      "7 / 19", "NEXT OBJECTIVE", "bn stats --details", "┏━┓", "Independent guided clears"):
             self.assertIn(item, arcade)
         for color in (81, 213, 221):
@@ -278,7 +317,7 @@ class LabTests(unittest.TestCase):
         self.runner("teardown")
 
         all_objectives = first_seven + "30.3,28.1,28.2,37.1,37.2,38.1,38.2,39.1,39.2,40.1,40.2,40.3,"
-        checkpoint_for(40, "0", all_objectives)
+        checkpoint_for(41, "0", all_objectives)
         finished = self.runner("stats")
         for item in ("Course cleared!", "100%", "ALL 8 PUZZLES CLEARED", "Every objective demonstrated!"):
             self.assertIn(item, finished)
@@ -286,21 +325,46 @@ class LabTests(unittest.TestCase):
 
     def test_course_options_and_plain_menu(self):
         self.runner("setup", "--puzzles")
-        contents = self.runner("setup", stdin="3\n8\n8\n")
+        contents = self.runner("setup", stdin="2\n8\n8\n")
         self.assertIn("(01–07) Navigation and file basics", contents)
-        self.assertIn("(33–40) Dispatch puzzles", contents)
-        menu = self.runner("setup", stdin="5\n1\n\n8\n")
+        self.assertIn("(34–41) Dispatch puzzles", contents)
+        menu = self.runner("setup", stdin="3\n\n8\n")
         self.assertIn("  5  Course options", menu)
         self.assertIn("Puzzle objectives demonstrated:", menu)
         self.assertNotIn("\x1b[", menu)
-        self.runner("setup", stdin="5\n3\n2\n8\n")
+        self.runner("setup", stdin="5\n2\n2\n8\n")
         self.assertTrue((self.root / ".auto-move").exists())
-        self.runner("setup", stdin="5\n3\n1\n8\n")
-        self.assertFalse((self.root / ".auto-move").exists())
         self.runner("setup", stdin="5\n2\n1\n8\n")
+        self.assertFalse((self.root / ".auto-move").exists())
+        self.runner("setup", stdin="5\n1\n1\n8\n")
         self.assertFalse((self.root / "previous-attempts").exists())
-        self.runner("restart", "--confirm", "34", success=False)
+        self.runner("restart", "--confirm", "35", success=False)
         self.assertFalse((self.root / "previous-attempts").exists())
+
+    def test_review_from_player_stats_keeps_main_attempt(self):
+        self.runner("setup", "--jump", "9")
+        lesson = self.lesson(9)
+        (lesson / "my-notes").write_text("night shift")
+        self.runner("hint")
+        menu = self.runner("setup", stdin="3\n1\nexit\n")
+        self.assertIn("09  Separate output and errors  ·  Hint", menu)
+        practice_id = (self.root / ".last-practice").read_text().strip()
+        self.env["LINUX_LAB_PRACTICE_ID"] = practice_id
+        review = self.root / (".practice." + practice_id) / "lessons/09"
+        self.assertFalse((review / "my-notes").exists())
+        (review / "reception.txt").write_text("Station online\n")
+        (review / "problems.txt").write_text("Parcel label missing\n")
+        receipt = self.runner("submit")
+        self.assertLess(receipt.index("✓ reception.txt"), receipt.index("What you practiced"))
+        self.assertLess(receipt.index("What you practiced"), receipt.index("Challenge 10"))
+        del self.env["LINUX_LAB_PRACTICE_ID"]
+        self.assertEqual((lesson / "my-notes").read_text(), "night shift")
+        self.assertIn("Challenge 09", self.runner("current"))
+        self.assertIn("09  Separate output and errors  ✓ Replayed independently", self.runner("stats"))
+        self.runner("save")
+        self.runner("teardown")
+        self.runner("setup", "--resume", str(self.home / "beginnix-progress.txt"))
+        self.assertIn("✓ Replayed independently", self.runner("stats"))
 
     def test_menu_arrows_update_in_place(self):
         command = f"stty rows 11 cols 80; bash {shlex.quote(str(SCRIPT))}; exit $?"
@@ -312,16 +376,16 @@ class LabTests(unittest.TestCase):
                     cwd=self.home, env=dict(self.env, TERM="xterm", NO_COLOR=no_color),
                     check=True, timeout=5)
                 initial, updates = result.stdout.split("Enter to select", 1)
-                self.assertIn(" > Setup", initial)
+                self.assertIn(" ><> Start guided training", initial)
                 self.assertNotIn("\x1b[2J", updates)
                 self.assertNotIn("Main menu", updates)
                 self.assertNotIn("Enter to select", updates)
-                self.assertEqual(updates.count(" > Table of contents"), 1)
-                self.assertEqual(updates.count(" > Setup"), 1)
-                self.assertEqual(updates.count(" > Exit"), 1)
+                self.assertEqual(updates.count(" ><> Table of contents"), 1)
+                self.assertEqual(updates.count(" ><> Start guided training"), 1)
+                self.assertEqual(updates.count(" ><> Exit"), 1)
                 # How to play is untouched until the list scrolls on wraparound.
                 self.assertEqual(updates.count("How to play"), 1)
-                self.assertEqual("\x1b[7;1m" in updates, not no_color)
+                self.assertEqual("\x1b[1;97;45m" in updates, not no_color)
 
     def test_teardown_from_sourced_and_direct_launcher(self):
         runner = shlex.quote(str(SCRIPT))
@@ -372,30 +436,34 @@ class LabTests(unittest.TestCase):
                 send("host_pid=$$; host_dir=$PWD")
                 send(f"bash {shlex.quote(str(SCRIPT))} setup --training")
                 expect("menu to return to the main menu.")
-                expect("[BEGINNIX LAB]")
+                expect("[BEGINNIX LAB] [Challenge 01]")
                 send("touch scratch-note && bn restart --confirm")
                 expect("Previous attempt:")
                 expect("Challenge 01")
                 send('test ! -e scratch-note && cat supplies/note.txt | submit')
                 expect("Choice [1]")
-                send("1")
-                expect("Challenge 02")
-                send('bn -s "$(cat .dispatch/morning-dispatch-for-the-training-crew.txt)"')
+                send("\x1b[B\x1b[A")  # Arrow keys, then Enter, choose Move.
+                expect("[BEGINNIX LAB] [Challenge 02]")
+                send("cd .dispatch")
+                expect("[BEGINNIX LAB] [Challenge 02]")
+                send('bn -s "$(cat morning-dispatch-for-the-training-crew.txt)"')
                 expect("Choice [1]")
                 send("2")
                 expect("Staying here")
+                expect("[BEGINNIX LAB] [Challenge 03]")
+                send("cd ..")
                 send('printf "still-in-%s\\n" "${PWD##*/}"')
                 expect("still-in-02")
                 send("lab --submit 'FLAG{r-c-3}'")
                 expect("Choice [1]")
                 send("3")
-                expect("Challenge 04")
+                expect("[BEGINNIX LAB] [Challenge 04]")
                 send('mkdir staging && touch staging/arrival.txt && submit')
-                expect("Challenge 05")
+                expect("[BEGINNIX LAB] [Challenge 05]")
                 send('printf "arrived-in-%s\\n" "${PWD##*/}"')
                 expect("arrived-in-05")
                 send("menu")
-                expect("\x1b[7;1m > Continue course")
+                expect("\x1b[1;97;45m ><> Continue course")
                 send("")  # Reopen the course in a fresh shell.
                 expect("menu to return to the main menu.")
                 send("cp manifest.txt backup.txt && mv draft.txt ready.txt")
@@ -410,6 +478,15 @@ class LabTests(unittest.TestCase):
                 send("bn move ask")
                 expect("After submission: ask")
                 self.assertFalse((self.root / ".auto-move").exists())
+                send("bn hint")
+                expect("[BEGINNIX LAB] [Challenge 06]")
+                send("bn stats")
+                expect("Review a lesson")
+                expect("Enter to select")
+                send("")
+                expect("Practice session")
+                expect("[BEGINNIX LAB] [Challenge 06]")
+                self.assertTrue((self.root / ".last-practice").exists())
                 send("bn teardown")
                 expect("Lab removed.")
                 send('[[ $$ == "$host_pid" && $PWD == "$host_dir" ]] && printf "original-%s\\n" shell')

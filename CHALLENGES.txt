@@ -9,8 +9,8 @@ Use these numbers in the table of contents or with setup --jump N.
     pwd, ls, cd, cat. Navigate to a supply note and read it.
 
 02  Find the hidden note
-    ls, cd, cat. Find the morning handoff among 65 files in a hidden
-    directory using Tab completion. Try shell history after completion.
+    ls --help, cd, cat. Read a Usage line, find a hidden directory,
+    and use Tab completion to open the morning handoff among five files.
 
 03  Read the docs
     help, man, grep. Look up two options and count warning lines in a log.
@@ -55,99 +55,102 @@ Use these numbers in the table of contents or with setup --jump N.
     file, gzip, gunzip. Identify one compressed file among 63 similarly
     named parcels, record its original filename, and read it.
 
-16  Unlock the note
+16  Fetch the relay system label
+    curl. Read a local file URL and use -o to save the response.
+
+17  Unlock the note
     stat, chmod. Inspect the owner, group, and permissions, then add read
     permission for the owner while keeping the other permissions intact.
 
-17  Two ways to link
+18  Two ways to link
     ln, readlink, ls. Make a symbolic link and a hard link to the same file,
     then inspect the stored path and compare inode numbers.
 
-18  Edit the shift notes
-    vim or nvim. Search 80 bay entries, edit one status, and save the file.
+19  Edit the shift notes
+    nano, vim, or nvim. Search 80 bay entries, edit one status, and save the file.
 
-19  Switch shells
+20  Switch shells
     ps, sh. Identify the current shell by PID, start a child shell, and
     submit from inside it.
 
-20  Find your own process
+21  Find your own process
     sleep, ps, shell background jobs. Start a timer in the background and
     record its PID while it is still running.
 
-21  Fingerprint a key
+22  Fingerprint a key
     ssh-keygen. Create a local SSH key pair, identify the public key, and
     record its fingerprint.
 
-22  Read the system label
+23  Read the system label
     uname. Record the kernel release and machine architecture.
 
-23  Weigh the parcels
+24  Weigh the parcels
     df, du. Identify the filesystem type and compare 59 parcel directories.
 
-24  Find the loopback
+25  Find the loopback
     ip. Record the loopback interface and its IPv4 address with prefix length.
 
-25  See what's listening
+26  See what's listening
     Read a socket capture and identify the loopback-only listener. Explore ss locally.
 
-26  Find the latest dispatch warning
+27  Find the latest dispatch warning
     tail, grep. Inspect the last 60 log entries and match the newest warning
     from the dispatch service among recent lookalikes.
 
-27  Reconcile the scans
+28  Reconcile the scans
     grep, cut, awk, sort, wc. Filter records by exact field values, sort and
     deduplicate parcel IDs, then report the first ID and distinct count.
 
-28  Pass arguments to a script
+29  Pass arguments to a script
     Bash, positional parameters, shebang, chmod. Format a dock and parcel
     ID and run the script directly.
 
-29  Make a dispatch decision
+30  Make a dispatch decision
     Bash if, elif, else. Read a complete example, then write a decision
     script using an exact status check and a numeric threshold.
 
-30  Loop over the queue
+31  Loop over the queue
     Bash for, quoted "$@". Handle any number of route labels in order.
 
-31  Read from a pipeline
+32  Read from a pipeline
     Walk through IFS and while read with a small pipeline. Split and filter
     incoming rows, then write the matching IDs to a file from the script.
 
-32  Remember the last status
+33  Remember the last status
     Walk through an awk array and END example. Keep each parcel’s latest
     status, then filter it with if.
 
-33  Rebuild the dispatch packet
+34  Rebuild the dispatch packet
     Outcome-based puzzle. Match night-shift approvals to two route sheets
     in a 72-file warehouse. Assemble the handoff and verify its manifest.
 
-34  Reconcile the intake
+35  Reconcile the intake
     Compare two 80-plus-row inventories. Report missing and extra SOUTH
     crates while accounting for duplicate scans and a neighboring zone.
 
-35  Recover the verified handoff
+36  Recover the verified handoff
     Extract an archive of 72 notes, identify the verified record for the
     required batch, produce a note and summary, and preserve the archive checksum.
 
-36  Audit the unresolved holds
+37  Audit the unresolved holds
     Determine the current status from 192 events. Report EAST tickets
     still on hold after accounting for later updates.
 
-37  Build the dispatch timeline
+38  Build the dispatch timeline
     Combine two scanner logs. Apply exact field and time-window filters,
     deduplicate overlapping events, and produce a chronological report.
 
-38  Apply the approved access
+39  Apply the approved access
     Filter 64 permission requests and change modes on approved files only.
     The grader checks the modes of every route file.
 
-39  Audit the overnight permission changes
+40  Audit the overnight permission changes
     Compare fictional mode inventories and maintenance tickets to distinguish
     an unapproved SUID change from approved and preexisting access.
 
-40  The shipment that will not import
+41  The shipment that will not import
     Inspect invisible bytes and repair a manifest while preserving exact
     destination names, record order, and the rejected original.
 
-Challenges 28–32 form the scripting block. The puzzle track starts at
-challenge 33.
+Challenges 29–33 form the scripting block. The puzzle track starts at
+challenge 34.

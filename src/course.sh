@@ -1,9 +1,10 @@
-previous_course_order=(1 2 6 19 20 21 22 23 24 25 26 3 4 18 7 8 9 10 12 11 13 14 15 16 17 5 27 28 29 30)
-course_order=(1 2 6 19 20 21 22 23 24 31 25 26 3 4 18 7 8 9 10 12 11 13 14 15 16 17 5 32 33 34 35 36 27 29 30 28 37 38 39 40)
+previous_course_order=(1 2 6 19 20 21 22 23 24 25 26 3 4 18 41 7 8 9 10 12 11 13 14 15 16 17 5 27 28 29 30)
+course_order=(1 2 6 19 20 21 22 23 24 31 25 26 3 4 18 41 7 8 9 10 12 11 13 14 15 16 17 5 32 33 34 35 36 27 29 30 28 37 38 39 40)
 total=${#course_order[@]}
-version=44
+version=52
 puzzle_start_id=27
 lesson_titles=(
+    [41]="Fetch the relay system label"
     [1]='Find your bearings'
     [2]='Find the hidden note'
     [3]='Follow the ticket'
@@ -46,7 +47,61 @@ lesson_titles=(
     [40]='The shipment that will not import'
 )
 sections=('Navigation and file basics' 'Shell output and text processing' 'Searching and inspecting files' 'Permissions, links and shell tools' 'System and network inspection' 'Scan analysis and shell scripting' 'Dispatch puzzles')
-section_starts=(1 8 13 16 22 27 33 41)
+section_starts=(1 8 13 17 23 28 34 42)
+
+section_index() {
+    local index
+    for index in "${!sections[@]}"; do
+        if (( $1 < section_starts[index+1] )); then printf '%d' "$index"; return; fi
+    done
+}
+
+guided_receipts=(
+    [41]="Saved an exact copy of the system label from a local URL."
+    [1]='Recovered the supply note from its directory.'
+    [2]='Read the handoff inside the hidden dispatch directory.'
+    [3]='Identified the flag on the requested ticket.'
+    [4]='Recovered the receipt inside the layered shipment.'
+    [5]='Reported the first qualifying parcel and the distinct count.'
+    [6]='Identified both options and counted the matching warning lines.'
+    [7]='Restored owner read access and recovered the note.'
+    [8]='Built a symbolic link and a hard link to the requested file.'
+    [9]='Saved the correct status under BAY-07.'
+    [10]='Submitted the dispatch from inside sh.'
+    [11]='Recorded the public key fingerprint in fingerprint.txt.'
+    [12]='Identified the live timer by PID.'
+    [13]='Recorded the kernel release and machine architecture.'
+    [14]='Identified the filesystem and the largest parcel directory.'
+    [15]='Recorded the loopback interface and its IPv4 prefix.'
+    [16]='Identified the port of the loopback-only listener.'
+    [17]='Matched the latest dispatch warning to its ticket.'
+    [18]='Identified the gzip parcel and recovered its contents.'
+    [19]='Created staging/arrival.txt as an empty file.'
+    [20]='Backed up the manifest and renamed the draft.'
+    [21]='Cleared the scratch directory and preserved keep.txt.'
+    [22]='Copied the matching route sheets and preserved the originals.'
+    [23]='Wrote the opening line and appended the parcel receipt.'
+    [24]='reception.txt contains the normal status.
+  ✓ problems.txt contains the error message.'
+    [25]='Identified the parcel whose status changed.'
+    [26]='Listed the adjacent duplicate groups in scan order.'
+    [31]='Formatted the route labels and zero-padded parcel IDs.'
+    [32]='Printed labels correctly for the tested dock and parcel arguments.'
+    [33]='Made the expected decisions for the tested statuses and counts.'
+    [34]='Kept queue arguments in order, including labels with spaces.'
+    [35]='Filtered incoming records and wrote the matching IDs.'
+    [36]='Reported the final qualifying parcel states from the test input.'
+)
+
+section_skills=(
+    'Navigate the depot, manage files and select route sheets by name.'
+    'Route output and errors, format labels and compare records.'
+    'Search log trees and recover records from compressed parcels.'
+    'Manage file access, links, editors, processes and key fingerprints.'
+    'Inspect the host, storage, network interfaces and service logs.'
+    'Turn field comparisons, conditions and loops into repeatable reports.'
+    'Reconstruct handoffs, audit permissions and repair damaged records.'
+)
 
 challenge_position() {
     local position
@@ -140,7 +195,7 @@ prepare_active_lesson_if_missing() (
 refresh_search_fixtures() {
     local marker="$state_dir/.expanded-search-fixtures" challenge destination
     [[ -e "$marker" ]] && return 0
-    for challenge in 2 3 9 14 17 18 22 25 26; do
+    for challenge in 3 9 14 17 18 22 25 26; do
         destination=$(folder "$challenge")
         [[ -f "$destination/README.txt" ]] || continue
         case "$challenge" in
@@ -148,7 +203,7 @@ refresh_search_fixtures() {
             *) expand_search_fixture "$challenge" "$destination" ;;
         esac
         case "$challenge" in
-            2|14|17|22) write_intro "$challenge" "$destination" ;;
+            14|17|22) write_intro "$challenge" "$destination" ;;
         esac
     done
     touch -- "$marker"
@@ -156,12 +211,28 @@ refresh_search_fixtures() {
 
 refresh_lesson_prompts() {
     local lesson lesson_dir
-    if [[ ! -e "$state_dir/.submission-prompts-v44" ]]; then
+    if [[ ! -e "$state_dir/.lesson-prompts-v52" ]]; then
         for lesson in "${course_order[@]}"; do
             lesson_dir=$(folder "$lesson")
             if [[ -f "$lesson_dir/README.txt" ]]; then write_intro "$lesson" "$lesson_dir"; fi
         done
-        touch -- "$state_dir/.submission-prompts-v44"
+        touch -- "$state_dir/.lesson-prompts-v52"
+    fi
+    if [[ ! -e "$state_dir/.hidden-note-v45" ]]; then
+        lesson_dir=$(folder 2)
+        local dispatch="$lesson_dir/.dispatch" sample old_note
+        if [[ -d "$dispatch" && ! -L "$dispatch" && ! -L "$lesson_dir" && ! -L "${lesson_dir%/*}" ]]; then
+            add_dispatch_notes "$dispatch"
+            for (( sample=1; sample<=64; sample++ )); do
+                printf -v old_note '%s/handoff-%02d.txt' "$dispatch" "$sample"
+                if [[ -f "$old_note" && ! -L "$old_note" ]] &&
+                   cmp -s -- "$old_note" <(printf 'Routine dispatch handoff %02d\n' "$sample"); then
+                    rm -- "$old_note"
+                fi
+            done
+            write_intro 2 "$lesson_dir"
+        fi
+        touch -- "$state_dir/.hidden-note-v45"
     fi
     local marker="$state_dir/.lesson-prompts-v31" challenge destination
     [[ -e "$marker" ]] && return 0

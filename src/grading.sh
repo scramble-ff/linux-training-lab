@@ -126,19 +126,22 @@ check_puzzle_objective() {
 }
 
 grade_puzzle() {
+    local -a results=()
     local directory index feedback passed=0 key before=$earned
     directory=$(folder "$current")
     for index in "${!objectives[@]}"; do
         key="$current.$((index+1))"
         if feedback=$(check_puzzle_objective "$current" "$((index+1))" "$directory" 2>&1); then
-            printf '  [x] %s\n' "${objectives[index]}"
+            results+=("  [x] ${objectives[index]}")
             passed=$((passed + 1))
             if [[ "$earned" != *",$key,"* ]]; then earned+="$key,"; fi
         else
-            printf '  [ ] %s — %s\n' "${objectives[index]}" "$feedback"
+            results+=("  [ ] ${objectives[index]} — $feedback")
         fi
     done
     if [[ "$before" != "$earned" ]]; then save_state; fi
+    if [[ ${1:-} == submit ]] && (( passed == ${#objectives[@]} )); then return 0; fi
+    printf '%s\n' "${results[@]}"
     printf '%d/%d objectives currently met.\n' "$passed" "${#objectives[@]}"
     (( passed == ${#objectives[@]} ))
 }
@@ -201,7 +204,8 @@ show_stats() {
             fi
         fi
     fi
-    local hints='' answers='' entry
+    local hints='' answers='' entry used badge pick
+    local -a review_labels=() review_positions=()
     solved=$(solved_count)
     limit=$((total-first_challenge+1))
     elapsed=$(elapsed_seconds)
@@ -215,9 +219,21 @@ show_stats() {
 
     for ((position=first_challenge; position<=total; position++)); do
         id=${course_order[position-1]}
-        printf -v entry '%02d  %s\n' "$position" "${lesson_titles[id]}"
-        if [[ -f "$state_dir/.hint-$id" ]]; then hints+="$entry"; fi
-        if [[ -f "$state_dir/.answer-$id" ]]; then answers+="$entry"; fi
+        badge='' used=''
+        if [[ "$reassessed" == *",$id,"* ]]; then badge='  ✓ Replayed independently'; fi
+        printf -v entry '%02d  %s%s' "$position" "${lesson_titles[id]}" "$badge"
+        if [[ -f "$state_dir/.hint-$id" ]]; then
+            hints+="$entry"$'\n'
+            used='Hint'
+        fi
+        if [[ -f "$state_dir/.answer-$id" ]]; then
+            answers+="$entry"$'\n'
+            used="${used:+$used + }Walkthrough"
+        fi
+        if [[ -n "$used" ]]; then
+            review_labels+=("$entry  ·  $used")
+            review_positions+=("$position")
+        fi
         puzzle_objectives "$id"
         if (( ${#objectives[@]} == 0 )); then
             available=$((available+1))
@@ -278,8 +294,10 @@ show_stats() {
         arrow=$star
     fi
     printf '%s%s%s\n%s%s %s%s\n\n' "$pink" "$next_label" "$reset" "$gold" "$arrow" "$next_action" "$reset"
-    printf '%sHints used%s\n%s\n' "$sky" "$reset" "${hints:-None recorded.}"
-    printf '%sAnswers revealed%s\n%s\n' "$gold" "$reset" "${answers:-None recorded.}"
+    if [[ ${2:-} != review ]] || (( ! ${#review_labels[@]} )); then
+        printf '%sHints used%s\n%s\n' "$sky" "$reset" "${hints:-None recorded.}"
+        printf '%sAnswers revealed%s\n%s\n' "$gold" "$reset" "${answers:-None recorded.}"
+    fi
     printf 'Elapsed: %dh %02dm %02ds\nIncorrect submissions: %d (free retries)\n' \
         "$((elapsed/3600))" "$((elapsed/60%60))" "$((elapsed%60))" "$mistakes"
     if (( score )); then printf 'Previous scoring system: %d historical points\n' "$score"; fi
@@ -288,16 +306,39 @@ show_stats() {
         if [[ "$details" == --details || ! -t 1 ]]; then printf '\nPuzzle checklist\n%s' "$checklist"
         else printf 'Puzzle checklist: bn stats --details\n'; fi
     fi
+    if [[ ${2:-} == review ]]; then
+        if (( ${#review_labels[@]} )); then
+            menu_style=inline choose_row 'Review a lesson · Enter starts a separate practice attempt' "${review_labels[@]}" Back
+            printf '\n'
+            if (( pick < ${#review_positions[@]} )); then number=${review_positions[pick]}; fi
+        else
+            printf '\nPress Enter to return. '
+            IFS= read -r || :
+        fi
+    fi
 }
 
 # A separate practice run can certify a walkthrough completion. It never
 # advances the main run or changes its active lesson or working files.
 record_independent_replay() (
-    local id=$1 practice_earned=$earned key index
+    local id=$1 practice_earned=$earned
     [[ "$state_dir" != "$root" && ! -f "$state_dir/.answer-$id" ]] || return 0
+    local source_id
+    if [[ -f "$state_dir/.review-source" ]]; then
+        read -r source_id < "$state_dir/.review-source"
+        if valid_practice "$source_id"; then
+            (state_dir="$root/.practice.$source_id"; credit_replay "$id" "$practice_earned")
+        fi
+    fi
     state_dir=$root
+    credit_replay "$id" "$practice_earned"
+)
+
+credit_replay() {
+    local id=$1 practice_earned=$2 key index
     load_state
-    is_solved "$id" && [[ -f "$root/.answer-$id" ]] || return 0
+    is_solved "$id" || [[ "$current" == "$id" ]] || return 0
+    [[ -f "$state_dir/.answer-$id" || -f "$state_dir/.hint-$id" ]] || return 0
     [[ "$reassessed" != *",$id,"* ]] || return 0
     reassessed+="$id,"
     puzzle_objectives "$id"
@@ -306,5 +347,6 @@ record_independent_replay() (
         if [[ "$practice_earned" == *",$key,"* && "$earned" != *",$key,"* ]]; then earned+="$key,"; fi
     done
     save_state
-    printf 'Independent replay recorded for the main course.\n'
-)
+    if [[ "$state_dir" == "$root" ]]; then printf 'Independent replay recorded for the main course.\n'
+    else printf 'Independent replay recorded for the practice run.\n'; fi
+}
